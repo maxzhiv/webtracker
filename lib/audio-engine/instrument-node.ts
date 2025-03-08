@@ -16,6 +16,7 @@ export class InstrumentNode {
       oscillator: OscillatorNode | AudioBufferSourceNode;
       gain: GainNode;
       filterEnvelope?: GainNode;
+      filterModSource?: ConstantSourceNode;
     }
   > = new Map();
 
@@ -243,7 +244,7 @@ export class InstrumentNode {
 
     // Create filter envelope modulation
     const filterEnvelope = this.context.createGain();
-    filterEnvelope.gain.setValueAtTime(this.instrument.filter.frequency, time);
+    filterEnvelope.gain.setValueAtTime(0, time); // Start at 0 modulation
     console.log(
       "[Filter Envelope] Created modulation gain node with initial frequency:",
       this.instrument.filter.frequency
@@ -252,6 +253,12 @@ export class InstrumentNode {
     // Connect oscillator to note gain to filter
     oscillator.connect(noteGain);
     noteGain.connect(this.filter);
+
+    // Set base filter frequency
+    this.filter.frequency.setValueAtTime(
+      this.instrument.filter.frequency,
+      time
+    );
 
     // Calculate modulation amount in Hz
     const maxModulation = 10000; // Maximum modulation range in Hz
@@ -267,10 +274,16 @@ export class InstrumentNode {
     this.applyEnvelope(
       filterEnvelope.gain,
       this.instrument.filter.envelope,
-      this.instrument.filter.frequency,
-      scaledAmount,
+      0, // Start from 0
+      1, // Full modulation range
       time
     );
+
+    // Create constant source for filter modulation
+    const filterModSource = this.context.createConstantSource();
+    filterModSource.offset.value = scaledAmount;
+    filterModSource.connect(filterEnvelope);
+    filterModSource.start(time);
 
     // Connect filter envelope to filter frequency
     filterEnvelope.connect(this.filter.frequency);
@@ -286,6 +299,7 @@ export class InstrumentNode {
       oscillator,
       gain: noteGain,
       filterEnvelope,
+      filterModSource, // Store for cleanup
     });
   }
 
@@ -313,13 +327,13 @@ export class InstrumentNode {
       const currentValue = note.filterEnvelope.gain.value;
       console.log("[Filter Envelope] Starting release phase:", {
         currentValue,
-        targetValue: this.instrument.filter.frequency,
+        targetValue: 0,
         duration: this.instrument.filter.envelope.release,
       });
 
       note.filterEnvelope.gain.setValueAtTime(currentValue, time);
       note.filterEnvelope.gain.linearRampToValueAtTime(
-        this.instrument.filter.frequency,
+        0,
         time + this.instrument.filter.envelope.release
       );
     }
@@ -331,6 +345,10 @@ export class InstrumentNode {
       note.gain.disconnect();
       if (note.filterEnvelope) {
         note.filterEnvelope.disconnect();
+      }
+      if (note.filterModSource) {
+        note.filterModSource.stop();
+        note.filterModSource.disconnect();
       }
       this.activeNotes.delete(midiNote);
       console.log("[Filter Envelope] Cleaned up note:", midiNote);
