@@ -370,8 +370,18 @@ export default function DAW() {
               <TabsTrigger value="song">Song Editor</TabsTrigger>
             </TabsList>
 
-            <div className="flex-1 overflow-auto p-4">
-              <TabsContent value="instruments" className="h-full">
+            <div className="flex-1 overflow-auto p-0">
+              <TabsContent value="instruments" className="h-full flex flex-col">
+                <PatternEditor
+                  patterns={project.patterns}
+                  instruments={project.instruments}
+                  currentPatternIndex={currentPatternIndex}
+                  setCurrentPatternIndex={setCurrentPatternIndex}
+                  onAddPattern={handleAddPattern}
+                  onUpdatePattern={handleUpdatePattern}
+                  onRemovePattern={handleRemovePattern}
+                  audioEngine={audioEngine}
+                />
                 <InstrumentEditor
                   instruments={project.instruments}
                   onAddInstrument={handleAddInstrument}

@@ -515,36 +515,15 @@ export default function PatternEditor({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">Pattern Editor</h2>
-        <div className="flex gap-2">
-          <Button onClick={onAddPattern} disabled={patterns.length >= 255}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Pattern
-          </Button>
-          <Button
-            variant={isPlaying ? "destructive" : "default"}
-            onClick={playPattern}
-            disabled={!currentPattern}
-          >
-            {isPlaying ? (
-              <>
-                <Square className="mr-2 h-4 w-4" /> Stop
-              </>
-            ) : (
-              <>
-                <Play className="mr-2 h-4 w-4" /> Play Pattern
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-
       {patterns.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-gray-400">
             No patterns. Click "Add Pattern" to create one.
           </p>
+          <Button onClick={onAddPattern} disabled={patterns.length >= 255}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Pattern
+          </Button>
         </div>
       ) : (
         <div className="flex gap-4 h-full">
@@ -578,13 +557,17 @@ export default function PatternEditor({
                 </button>
               </div>
             ))}
+            <Button onClick={onAddPattern} disabled={patterns.length >= 255}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Pattern
+            </Button>
           </div>
 
           {/* Pattern Editor */}
           {currentPattern && (
             <div className="flex-1 overflow-hidden">
-              <Card className="h-full flex flex-col">
-                <CardHeader className="pb-2">
+              <Card className="h-full flex flex-col p-0 gap-0 mb-2">
+                <div className="p-0">
                   <div className="flex justify-between items-center">
                     <CardTitle>
                       <Input
@@ -595,8 +578,8 @@ export default function PatternEditor({
                         className="max-w-xs"
                       />
                     </CardTitle>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-0">
+                      <div className="flex items-center gap-0">
                         <span>Tempo:</span>
                         <Input
                           type="number"
@@ -613,7 +596,7 @@ export default function PatternEditor({
                         />
                         <span>BPM</span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-0">
                         <span>Tracks:</span>
                         <Select
                           value={currentPattern.tracks.toString()}
@@ -636,7 +619,7 @@ export default function PatternEditor({
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-0">
                         <span>Rows:</span>
                         <Select
                           value={currentPattern.rows.toString()}
@@ -658,19 +641,19 @@ export default function PatternEditor({
                       </div>
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent className="flex-1 overflow-auto p-0">
+                </div>
+                <div className="flex-1 overflow-auto p-0">
                   <div className="tracker-grid relative">
                     {/* Header row with track numbers */}
                     <div className="flex border-b border-gray-700">
-                      <div className="w-12 p-2 text-center bg-gray-800 border-r border-gray-700">
+                      <div className="w-12 p-0 text-center bg-gray-800 border-r border-gray-700">
                         #
                       </div>
                       {Array.from({ length: currentPattern.tracks }).map(
                         (_, trackIndex) => (
                           <div
                             key={trackIndex}
-                            className="flex-1 p-2 text-center bg-gray-800 border-r border-gray-700"
+                            className="flex-1 p-0 text-center bg-gray-800 border-r border-gray-700"
                           >
                             {trackIndex + 1}
                           </div>
@@ -742,7 +725,7 @@ export default function PatternEditor({
                       )
                     )}
                   </div>
-                </CardContent>
+                </div>
               </Card>
             </div>
           )}

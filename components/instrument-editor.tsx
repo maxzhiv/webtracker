@@ -238,19 +238,18 @@ export default function InstrumentEditor({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">Instruments</h2>
-        <Button onClick={onAddInstrument} disabled={instruments.length >= 255}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Instrument
-        </Button>
-      </div>
-
       {instruments.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-gray-400">
             No instruments. Click "Add Instrument" to create one.
           </p>
+          <Button
+            onClick={onAddInstrument}
+            disabled={instruments.length >= 255}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Instrument
+          </Button>
         </div>
       ) : (
         <div className="flex gap-4 h-full">
@@ -284,6 +283,13 @@ export default function InstrumentEditor({
                 </button>
               </div>
             ))}
+            <Button
+              onClick={onAddInstrument}
+              disabled={instruments.length >= 255}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Instrument
+            </Button>
           </div>
 
           {/* Instrument Editor */}

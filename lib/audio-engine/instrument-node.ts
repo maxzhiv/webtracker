@@ -29,7 +29,9 @@ export class InstrumentNode {
 
     // Create master gain node for instrument volume
     this.gainNode = context.createGain();
-    this.gainNode.gain.value = instrument.volume;
+    this.gainNode.gain.value = isFinite(instrument.volume)
+      ? instrument.volume
+      : 1;
     this.gainNode.connect(this.output);
 
     console.log("[InstrumentNode] Created with initial settings:", {
@@ -94,7 +96,7 @@ export class InstrumentNode {
 
     // Create voice pan
     const pan = this.context.createStereoPanner();
-    pan.pan.value = this.instrument.pan;
+    pan.pan.value = isFinite(this.instrument.pan) ? this.instrument.pan : 0;
 
     // Create filter envelope
     const filterEnvelope = this.context.createGain();
@@ -350,7 +352,9 @@ export class InstrumentNode {
     this.instrument = instrument;
 
     // Update master gain
-    this.gainNode.gain.value = instrument.volume;
+    this.gainNode.gain.value = isFinite(instrument.volume)
+      ? instrument.volume
+      : 1;
 
     // Update voice filters
     this.voicePool.forEach((voice) => {
