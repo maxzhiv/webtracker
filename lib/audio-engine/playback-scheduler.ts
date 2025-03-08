@@ -1,6 +1,7 @@
 import type { Pattern, Note } from "../types";
 import { EventSystem } from "./event-system";
 import { InstrumentNode } from "./instrument-node";
+import { PARAMETER_IDS, normalizeParameterValue } from "../types";
 
 export class PlaybackScheduler {
   private audioContext: AudioContext;
@@ -202,7 +203,126 @@ export class PlaybackScheduler {
     // Play the scheduled notes
     notesToSchedule.forEach((note) => {
       const instrument = this.instruments.get(note.instrument);
-      if (instrument) {
+      if (!instrument) {
+        console.warn(`[AudioEngine] Instrument ${note.instrument} not found`);
+        return;
+      }
+
+      // Handle parameter control notes (effect FF)
+      if (note.effect === 0xff) {
+        const parameterId = (note.effectValue >> 8) & 0xff; // High byte is parameter ID
+        const parameterValue = note.effectValue & 0xff; // Low byte is parameter value
+
+        console.log(
+          `[AudioEngine] Parameter control: instrument=${
+            note.instrument
+          }, param=${parameterId.toString(16)}, value=${parameterValue.toString(
+            16
+          )}`
+        );
+
+        // Get the normalized parameter value
+        const normalizedValue = normalizeParameterValue(
+          parameterId,
+          parameterValue
+        );
+
+        // Update the instrument parameter
+        const currentInstrument = instrument.getInstrument();
+        const updatedInstrument = { ...currentInstrument };
+
+        switch (parameterId) {
+          // Oscillator parameters
+          case PARAMETER_IDS.OSCILLATOR_TYPE:
+            const types = [
+              "sine",
+              "square",
+              "sawtooth",
+              "triangle",
+              "noise",
+              "sampler",
+            ];
+            updatedInstrument.oscillator.type =
+              types[Math.min(parameterValue, types.length - 1)];
+            break;
+          case PARAMETER_IDS.OSCILLATOR_DETUNE:
+            updatedInstrument.oscillator.detune = normalizedValue;
+            break;
+
+          // Filter parameters
+          case PARAMETER_IDS.FILTER_TYPE:
+            updatedInstrument.filter.type =
+              parameterValue === 0 ? "lowpass" : "highpass";
+            break;
+          case PARAMETER_IDS.FILTER_FREQUENCY:
+            updatedInstrument.filter.frequency = normalizedValue;
+            break;
+          case PARAMETER_IDS.FILTER_RESONANCE:
+            updatedInstrument.filter.resonance = normalizedValue;
+            break;
+          case PARAMETER_IDS.FILTER_ENVELOPE_AMOUNT:
+            updatedInstrument.filter.envelopeAmount = normalizedValue;
+            break;
+
+          // Filter envelope parameters
+          case PARAMETER_IDS.FILTER_ENVELOPE_TYPE:
+            const envTypes = ["ad", "ar", "adsr"];
+            updatedInstrument.filter.envelope.type = envTypes[
+              Math.min(parameterValue, envTypes.length - 1)
+            ] as any;
+            break;
+          case PARAMETER_IDS.FILTER_ENVELOPE_ATTACK:
+            updatedInstrument.filter.envelope.attack = normalizedValue;
+            break;
+          case PARAMETER_IDS.FILTER_ENVELOPE_DECAY:
+            updatedInstrument.filter.envelope.decay = normalizedValue;
+            break;
+          case PARAMETER_IDS.FILTER_ENVELOPE_SUSTAIN:
+            updatedInstrument.filter.envelope.sustain = normalizedValue;
+            break;
+          case PARAMETER_IDS.FILTER_ENVELOPE_RELEASE:
+            updatedInstrument.filter.envelope.release = normalizedValue;
+            break;
+
+          // Amplitude envelope parameters
+          case PARAMETER_IDS.ENVELOPE_TYPE:
+            const ampEnvTypes = ["ad", "ar", "adsr"];
+            updatedInstrument.envelope.type = ampEnvTypes[
+              Math.min(parameterValue, ampEnvTypes.length - 1)
+            ] as any;
+            break;
+          case PARAMETER_IDS.ENVELOPE_ATTACK:
+            updatedInstrument.envelope.attack = normalizedValue;
+            break;
+          case PARAMETER_IDS.ENVELOPE_DECAY:
+            updatedInstrument.envelope.decay = normalizedValue;
+            break;
+          case PARAMETER_IDS.ENVELOPE_SUSTAIN:
+            updatedInstrument.envelope.sustain = normalizedValue;
+            break;
+          case PARAMETER_IDS.ENVELOPE_RELEASE:
+            updatedInstrument.envelope.release = normalizedValue;
+            break;
+
+          // Global parameters
+          case PARAMETER_IDS.VOLUME:
+            updatedInstrument.volume = normalizedValue;
+            break;
+          case PARAMETER_IDS.PAN:
+            updatedInstrument.pan = normalizedValue;
+            break;
+          case PARAMETER_IDS.MAX_VOICES:
+            updatedInstrument.maxVoices = Math.floor(normalizedValue);
+            break;
+        }
+
+        // Update the instrument
+        instrument.updateInstrument(updatedInstrument);
+        return;
+      }
+
+      // Regular note playback
+      if (note.velocity > 0) {
         const velocity = note.velocity / 255;
         console.log(
           `[AudioEngine] Playing note: instrument=${note.instrument}, tone=${note.tone}, velocity=${velocity}`
@@ -212,8 +332,6 @@ export class PlaybackScheduler {
         // Schedule note off based on envelope
         const duration = this.getNoteDuration();
         instrument.noteOff(note.tone, this.nextNoteTime + duration);
-      } else {
-        console.warn(`[AudioEngine] Instrument ${note.instrument} not found`);
       }
     });
 
