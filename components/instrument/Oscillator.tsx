@@ -26,12 +26,12 @@ export default function Oscillator({
   onChangeParameter,
   onLoadSample,
 }: OscillatorProps) {
-  const handleChange = (field: string, value: number | string) => {
-    onChangeParameter(`${prefix}${field}`, value);
+  const handleChange = (field: string, value: any) => {
+    onChangeParameter(`${prefix}oscillator.${field}`, value);
   };
 
   const handleTypeChange = (value: string) => {
-    handleChange("oscillator.type", value);
+    handleChange("type", value);
     // Initialize sample data when switching to sampler
     if (value === "sampler" && !oscillator.sample) {
       const defaultSample = {
@@ -42,14 +42,14 @@ export default function Oscillator({
         gain: 1,
         loopType: "oneshot" as const,
       };
-      handleChange("oscillator.sample", JSON.stringify(defaultSample));
+      handleChange("sample", defaultSample);
     }
   };
 
   const handleSampleUpdate = (updates: Record<string, any>) => {
-    Object.entries(updates).forEach(([field, value]) => {
-      handleChange(`oscillator.sample.${field}`, value);
-    });
+    const currentSample = oscillator.sample || {};
+    const updatedSample = { ...currentSample, ...updates };
+    handleChange("sample", updatedSample);
   };
 
   return (

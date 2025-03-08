@@ -30,6 +30,13 @@ interface PatternEditorProps {
   audioEngine: AudioEngine;
 }
 
+interface Selection {
+  startRow: number;
+  startTrack: number;
+  endRow: number;
+  endTrack: number;
+}
+
 export default function PatternEditor({
   patterns,
   instruments,
@@ -44,6 +51,7 @@ export default function PatternEditor({
     row: number;
     track: number;
   } | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -325,6 +333,186 @@ export default function PatternEditor({
     onUpdatePattern(currentPatternIndex, updatedPattern);
   };
 
+  // Handle selection navigation
+  const handleSelectionNavigate = (
+    direction: "up" | "down" | "left" | "right"
+  ) => {
+    if (!editingCell || !currentPattern) return;
+
+    // Start new selection if none exists
+    if (!selection) {
+      setSelection({
+        startRow: editingCell.row,
+        startTrack: editingCell.track,
+        endRow: editingCell.row,
+        endTrack: editingCell.track,
+      });
+    }
+
+    const { row, track } = editingCell;
+    let newRow = row;
+    let newTrack = track;
+
+    switch (direction) {
+      case "up":
+        newRow = Math.max(0, row - 1);
+        break;
+      case "down":
+        newRow = Math.min(currentPattern.rows - 1, row + 1);
+        break;
+      case "left":
+        if (track > 0) {
+          newTrack = track - 1;
+        } else if (row > 0) {
+          newTrack = currentPattern.tracks - 1;
+          newRow = row - 1;
+        }
+        break;
+      case "right":
+        if (track < currentPattern.tracks - 1) {
+          newTrack = track + 1;
+        } else if (row < currentPattern.rows - 1) {
+          newTrack = 0;
+          newRow = row + 1;
+        }
+        break;
+    }
+
+    setEditingCell({ row: newRow, track: newTrack });
+    setSelection((prev) => ({
+      startRow: prev?.startRow ?? newRow,
+      startTrack: prev?.startTrack ?? newTrack,
+      endRow: newRow,
+      endTrack: newTrack,
+    }));
+  };
+
+  // Handle copy/paste
+  const handleCopy = () => {
+    if (!selection || !currentPattern) return;
+
+    const { startRow, startTrack, endRow, endTrack } = selection;
+    const minRow = Math.min(startRow, endRow);
+    const maxRow = Math.max(startRow, endRow);
+    const minTrack = Math.min(startTrack, endTrack);
+    const maxTrack = Math.max(startTrack, endTrack);
+
+    const selectedNotes = currentPattern.notes
+      .filter(
+        (note) =>
+          note.row >= minRow &&
+          note.row <= maxRow &&
+          note.track >= minTrack &&
+          note.track <= maxTrack
+      )
+      .map((note) => ({
+        ...note,
+        row: note.row - minRow,
+        track: note.track - minTrack,
+      }));
+
+    navigator.clipboard.writeText(
+      JSON.stringify({
+        notes: selectedNotes,
+        rows: maxRow - minRow + 1,
+        tracks: maxTrack - minTrack + 1,
+      })
+    );
+  };
+
+  const handlePaste = async () => {
+    if (!editingCell || !currentPattern) return;
+
+    try {
+      const text = await navigator.clipboard.readText();
+      const { notes, rows, tracks } = JSON.parse(text);
+
+      const pastedNotes = notes
+        .map((note: Note) => ({
+          ...note,
+          row: note.row + editingCell.row,
+          track: note.track + editingCell.track,
+        }))
+        .filter(
+          (note: Note) =>
+            note.row < currentPattern.rows && note.track < currentPattern.tracks
+        );
+
+      const updatedNotes = [
+        ...currentPattern.notes.filter(
+          (note) =>
+            !pastedNotes.some(
+              (pastedNote: Note) =>
+                pastedNote.row === note.row && pastedNote.track === note.track
+            )
+        ),
+        ...pastedNotes,
+      ];
+
+      onUpdatePattern(currentPatternIndex, {
+        ...currentPattern,
+        notes: updatedNotes,
+      });
+    } catch (error) {
+      console.error("Failed to paste notes:", error);
+    }
+  };
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey) {
+        switch (e.key) {
+          case "ArrowUp":
+            e.preventDefault();
+            handleSelectionNavigate("up");
+            break;
+          case "ArrowDown":
+            e.preventDefault();
+            handleSelectionNavigate("down");
+            break;
+          case "ArrowLeft":
+            e.preventDefault();
+            handleSelectionNavigate("left");
+            break;
+          case "ArrowRight":
+            e.preventDefault();
+            handleSelectionNavigate("right");
+            break;
+        }
+      } else if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case "c":
+            e.preventDefault();
+            handleCopy();
+            break;
+          case "v":
+            e.preventDefault();
+            handlePaste();
+            break;
+        }
+      } else {
+        setSelection(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editingCell, selection, currentPattern]);
+
+  // Check if a cell is within the current selection
+  const isCellSelected = (row: number, track: number) => {
+    if (!selection) return false;
+    const { startRow, startTrack, endRow, endTrack } = selection;
+    const minRow = Math.min(startRow, endRow);
+    const maxRow = Math.max(startRow, endRow);
+    const minTrack = Math.min(startTrack, endTrack);
+    const maxTrack = Math.max(startTrack, endTrack);
+    return (
+      row >= minRow && row <= maxRow && track >= minTrack && track <= maxTrack
+    );
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-4">
@@ -527,16 +715,21 @@ export default function PatternEditor({
                                     editingCell?.row === rowIndex &&
                                     editingCell?.track === trackIndex
                                   }
+                                  isSelected={isCellSelected(
+                                    rowIndex,
+                                    trackIndex
+                                  )}
                                   onNoteChange={(note) =>
                                     handleNoteChange(rowIndex, trackIndex, note)
                                   }
                                   onNavigate={handleNavigate}
-                                  onStartEdit={() =>
+                                  onStartEdit={(event: React.MouseEvent) => {
                                     setEditingCell({
                                       row: rowIndex,
                                       track: trackIndex,
-                                    })
-                                  }
+                                    });
+                                    if (!event.shiftKey) setSelection(null);
+                                  }}
                                   onFinishEdit={() => setEditingCell(null)}
                                   maxInstruments={instruments.length}
                                   caretPosition={caretPosition}

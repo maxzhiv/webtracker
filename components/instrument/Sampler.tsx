@@ -187,9 +187,9 @@ export default function Sampler({
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
 
     if (isDragging === "start" && x < sample.endPoint) {
-      onUpdateSample({ startPoint: x });
+      onUpdateSample({ ...sample, startPoint: x });
     } else if (isDragging === "end" && x > sample.startPoint) {
-      onUpdateSample({ endPoint: x });
+      onUpdateSample({ ...sample, endPoint: x });
     }
   };
 
@@ -239,7 +239,9 @@ export default function Sampler({
             max={1}
             step={0.01}
             size={60}
-            onChange={(value) => onUpdateSample({ gain: value })}
+            onChange={(value) =>
+              sample && onUpdateSample({ ...sample, gain: value })
+            }
           />
         </div>
         <div>
@@ -247,7 +249,8 @@ export default function Sampler({
           <Select
             value={sample?.loopType ?? "oneshot"}
             onValueChange={(value) =>
-              onUpdateSample({ loopType: value as LoopType })
+              sample &&
+              onUpdateSample({ ...sample, loopType: value as LoopType })
             }
           >
             <SelectTrigger>

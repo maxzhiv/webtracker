@@ -5,9 +5,10 @@ import { formatNote, parseNoteString } from "@/lib/utils";
 interface TrackerEventProps {
   note: Note | null;
   isEditing: boolean;
+  isSelected: boolean;
   onNoteChange: (note: Note | null) => void;
   onNavigate: (direction: "up" | "down" | "left" | "right") => void;
-  onStartEdit: () => void;
+  onStartEdit: (event: React.MouseEvent) => void;
   onFinishEdit: () => void;
   maxInstruments: number;
   caretPosition: number;
@@ -17,6 +18,7 @@ interface TrackerEventProps {
 export default function TrackerEvent({
   note,
   isEditing,
+  isSelected,
   onNoteChange,
   onNavigate,
   onStartEdit,
@@ -163,7 +165,7 @@ export default function TrackerEvent({
     onFinishEdit();
   };
 
-  // Render the tracker event with caret
+  // Render the tracker event with caret and selection
   const renderContent = () => {
     if (!isEditing && !note) {
       return <span className="opacity-50">............</span>;
@@ -187,12 +189,12 @@ export default function TrackerEvent({
         ))}
         {isEditing && (
           <span
-            className="absolute bg-transparent border border-gray-300 -ml-[1px]"
+            className="absolute bg-transparent border border-white -ml-[1px]"
             style={{
-              left: `${(caretPosition + 0.5) * 0.61}em`,
-              height: "1.6em",
-              width: "0.8em",
-              top: "0.2em",
+              left: `${caretPosition * 0.61}em`,
+              height: "1.2em",
+              width: "0.61em",
+              top: "0.1em",
             }}
           />
         )}
@@ -203,7 +205,9 @@ export default function TrackerEvent({
   return (
     <div
       ref={containerRef}
-      className="relative flex flex-row text-xs font-mono min-h-[1.5rem] w-full cursor-text select-none p-1"
+      className={`relative flex flex-row text-xs font-mono min-h-[1.5rem] w-full cursor-text select-none p-1 ${
+        isSelected ? "bg-blue-900/50" : ""
+      }`}
       onClick={onStartEdit}
       onKeyDown={handleKeyDown}
       tabIndex={0}
