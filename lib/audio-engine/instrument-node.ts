@@ -1,5 +1,6 @@
 import type { Instrument, Envelope } from "../types";
 import { midiToFrequency } from "../utils";
+import { PARAMETER_IDS } from "../types";
 
 export class InstrumentNode {
   private context: AudioContext;
@@ -7,6 +8,12 @@ export class InstrumentNode {
   private gainNode: GainNode;
   private instrument: Instrument;
   public sampleBuffer: AudioBuffer | null = null;
+
+  // LFO nodes
+  private lfo1: OscillatorNode;
+  private lfo1Gain: GainNode;
+  private lfo2: OscillatorNode;
+  private lfo2Gain: GainNode;
 
   // Voice pool structure
   private voicePool: {
@@ -34,13 +41,206 @@ export class InstrumentNode {
       : 1;
     this.gainNode.connect(this.output);
 
-    console.log("[InstrumentNode] Created with initial settings:", {
-      volume: instrument.volume,
-      maxVoices: instrument.maxVoices ?? 16,
-    });
+    // Initialize LFOs
+    this.lfo1 = context.createOscillator();
+    this.lfo1Gain = context.createGain();
+    this.lfo2 = context.createOscillator();
+    this.lfo2Gain = context.createGain();
 
     // Initialize voice pool with maximum voices
     this.initializeVoicePool();
+
+    // Set up initial LFO states AFTER voice pool is initialized
+    this.initializeLFOs();
+  }
+
+  private initializeLFOs() {
+    const now = this.context.currentTime;
+
+    // Set up LFO1
+    this.lfo1.type = this.instrument.lfo1?.waveform ?? "sine";
+    this.lfo1.frequency.setValueAtTime(
+      this.instrument.lfo1?.frequency ?? 1,
+      now
+    );
+    const lfo1Range = this.getModulationRange(this.instrument.lfo1.target);
+    this.lfo1Gain.gain.setValueAtTime(
+      lfo1Range * this.instrument.lfo1.depth,
+      now
+    );
+    this.lfo1.connect(this.lfo1Gain);
+
+    // Set up LFO2
+    this.lfo2.type = this.instrument.lfo2?.waveform ?? "sine";
+    this.lfo2.frequency.setValueAtTime(
+      this.instrument.lfo2?.frequency ?? 1,
+      now
+    );
+    const lfo2Range =
+      typeof this.instrument.lfo2.target === "number"
+        ? this.getModulationRange(this.instrument.lfo2.target)
+        : 1;
+    this.lfo2Gain.gain.setValueAtTime(
+      lfo2Range * this.instrument.lfo2.depth,
+      now
+    );
+    this.lfo2.connect(this.lfo2Gain);
+
+    // Start LFOs
+    this.lfo1.start(now);
+    this.lfo2.start(now);
+
+    // Route LFO modulation
+    this.routeLFOModulation();
+  }
+
+  private getModulationRange(target: number): number {
+    switch (target) {
+      case PARAMETER_IDS.OSCILLATOR_DETUNE:
+        return 1200; // +/- 1200 cents (1 octave)
+      case PARAMETER_IDS.FILTER_FREQUENCY:
+        return 10000; // +/- 10000 Hz
+      case PARAMETER_IDS.FILTER_RESONANCE:
+        return 10; // +/- 10 Q
+      case PARAMETER_IDS.VOLUME:
+        return 1; // +/- 1 (full volume range)
+      case PARAMETER_IDS.PAN:
+        return 1; // +/- 1 (full pan range)
+      default:
+        return 1;
+    }
+  }
+
+  private routeLFOModulation() {
+    // Disconnect existing modulation
+    this.lfo1Gain.disconnect();
+    this.lfo2Gain.disconnect();
+
+    // Set base values for parameters that will be modulated
+    const now = this.context.currentTime;
+
+    // Set LFO1 modulation depth and route it
+    const lfo1Range = this.getModulationRange(this.instrument.lfo1.target);
+    this.lfo1Gain.gain.setValueAtTime(
+      lfo1Range * this.instrument.lfo1.depth,
+      now
+    );
+
+    // Route LFO1
+    switch (this.instrument.lfo1.target) {
+      case PARAMETER_IDS.OSCILLATOR_DETUNE:
+        this.voicePool.forEach((voice, index) => {
+          if (voice.oscillator instanceof OscillatorNode) {
+            voice.oscillator.detune.setValueAtTime(
+              this.instrument.oscillator.detune,
+              now
+            );
+            this.lfo1Gain.connect(voice.oscillator.detune);
+          }
+        });
+        break;
+      case PARAMETER_IDS.FILTER_FREQUENCY:
+        this.voicePool.forEach((voice, index) => {
+          voice.voiceFilter.frequency.setValueAtTime(
+            this.instrument.filter.frequency,
+            now
+          );
+          this.lfo1Gain.connect(voice.voiceFilter.frequency);
+        });
+        break;
+      case PARAMETER_IDS.FILTER_RESONANCE:
+        this.voicePool.forEach((voice, index) => {
+          voice.voiceFilter.Q.setValueAtTime(
+            this.instrument.filter.resonance,
+            now
+          );
+          this.lfo1Gain.connect(voice.voiceFilter.Q);
+        });
+        break;
+      case PARAMETER_IDS.VOLUME:
+        this.gainNode.gain.setValueAtTime(this.instrument.volume, now);
+        this.lfo1Gain.connect(this.gainNode.gain);
+        break;
+      case PARAMETER_IDS.PAN:
+        this.voicePool.forEach((voice, index) => {
+          voice.pan.pan.setValueAtTime(this.instrument.pan, now);
+          this.lfo1Gain.connect(voice.pan.pan);
+        });
+        break;
+    }
+
+    // Set LFO2 modulation depth and route it
+    const lfo2Target = this.instrument.lfo2.target;
+    if (typeof lfo2Target === "number") {
+      const lfo2Range = this.getModulationRange(lfo2Target);
+      this.lfo2Gain.gain.setValueAtTime(
+        lfo2Range * this.instrument.lfo2.depth,
+        now
+      );
+
+      // Handle parameter targets similar to LFO1
+      switch (lfo2Target) {
+        case PARAMETER_IDS.OSCILLATOR_DETUNE:
+          this.voicePool.forEach((voice, index) => {
+            if (voice.oscillator instanceof OscillatorNode) {
+              voice.oscillator.detune.setValueAtTime(
+                this.instrument.oscillator.detune,
+                now
+              );
+              this.lfo2Gain.connect(voice.oscillator.detune);
+            }
+          });
+          break;
+        case PARAMETER_IDS.FILTER_FREQUENCY:
+          this.voicePool.forEach((voice, index) => {
+            voice.voiceFilter.frequency.setValueAtTime(
+              this.instrument.filter.frequency,
+              now
+            );
+            this.lfo2Gain.connect(voice.voiceFilter.frequency);
+          });
+          break;
+        case PARAMETER_IDS.FILTER_RESONANCE:
+          this.voicePool.forEach((voice, index) => {
+            voice.voiceFilter.Q.setValueAtTime(
+              this.instrument.filter.resonance,
+              now
+            );
+            this.lfo2Gain.connect(voice.voiceFilter.Q);
+          });
+          break;
+        case PARAMETER_IDS.VOLUME:
+          this.gainNode.gain.setValueAtTime(this.instrument.volume, now);
+          this.lfo2Gain.connect(this.gainNode.gain);
+          break;
+        case PARAMETER_IDS.PAN:
+          this.voicePool.forEach((voice, index) => {
+            voice.pan.pan.setValueAtTime(this.instrument.pan, now);
+            this.lfo2Gain.connect(voice.pan.pan);
+          });
+          break;
+      }
+    } else {
+      // Handle LFO1 modulation targets
+      switch (lfo2Target) {
+        case "lfo1_frequency":
+          // Scale frequency modulation range (0.1 to 20 Hz)
+          const freqRange = 20 * this.instrument.lfo2.depth;
+          this.lfo2Gain.gain.setValueAtTime(freqRange, now);
+          this.lfo1.frequency.setValueAtTime(
+            this.instrument.lfo1.frequency,
+            now
+          );
+          this.lfo2Gain.connect(this.lfo1.frequency);
+          break;
+        case "lfo1_depth":
+          // Scale depth modulation range (0 to 1)
+          this.lfo2Gain.gain.setValueAtTime(this.instrument.lfo2.depth, now);
+          this.lfo1Gain.gain.setValueAtTime(this.instrument.lfo1.depth, now);
+          this.lfo2Gain.connect(this.lfo1Gain.gain);
+          break;
+      }
+    }
   }
 
   private initializeVoicePool() {
@@ -76,7 +276,6 @@ export class InstrumentNode {
 
     // Create new voices
     const maxVoices = this.instrument.maxVoices ?? 16;
-    console.log("[InstrumentNode] Initializing voice pool:", { maxVoices });
     for (let i = 0; i < maxVoices; i++) {
       const voice = this.createVoice();
       this.voicePool.push(voice);
@@ -107,7 +306,6 @@ export class InstrumentNode {
     filterModSource.offset.value = 1; // Base value for modulation
 
     // Set up voice routing:
-    // OSC -> FILTER (+FLT ENV MOD) -> VOICE_GAIN * (AMP ENV MOD) -> VOICE PAN -> MASTER GAIN -> OUTPUT
     filterModSource.connect(filterEnvelope);
     filterEnvelope.connect(voiceFilter.frequency);
     voiceFilter.connect(gain);
@@ -115,11 +313,7 @@ export class InstrumentNode {
     pan.connect(this.gainNode);
     filterModSource.start();
 
-    console.log("[InstrumentNode] Created voice with routing:", {
-      routing: "OSC -> FILTER(+ENV) -> GAIN(+ENV) -> PAN -> MASTER -> OUT",
-    });
-
-    return {
+    const voice = {
       oscillator: null as any,
       gain,
       voiceFilter,
@@ -131,6 +325,8 @@ export class InstrumentNode {
       isActive: false,
       cleanupTimeout: null,
     };
+
+    return voice;
   }
 
   private initializeVoice(
@@ -150,11 +346,27 @@ export class InstrumentNode {
 
     // 1. Create and tune oscillator
     if (voice.oscillator instanceof OscillatorNode) {
+      voice.oscillator.stop();
       voice.oscillator.frequency.value = midiToFrequency(midiNote);
     } else {
       const newOscillator = this.createOscillator(midiNote);
       newOscillator.connect(voice.voiceFilter);
       voice.oscillator = newOscillator;
+
+      // Connect LFO modulation for detune if needed (only for new oscillators)
+      if (
+        this.instrument.lfo1.target === PARAMETER_IDS.OSCILLATOR_DETUNE &&
+        newOscillator instanceof OscillatorNode
+      ) {
+        this.lfo1Gain.connect(newOscillator.detune);
+      }
+      if (
+        typeof this.instrument.lfo2.target === "number" &&
+        this.instrument.lfo2.target === PARAMETER_IDS.OSCILLATOR_DETUNE &&
+        newOscillator instanceof OscillatorNode
+      ) {
+        this.lfo2Gain.connect(newOscillator.detune);
+      }
     }
 
     // 2. Reset filter envelope
@@ -171,21 +383,27 @@ export class InstrumentNode {
     voice.voiceFilter.frequency.setValueAtTime(baseFreq, time);
     voice.filterModSource.offset.setValueAtTime(modulationRange, time);
 
+    // Connect LFO modulation for filter parameters
+    if (this.instrument.lfo1.target === PARAMETER_IDS.FILTER_FREQUENCY) {
+      this.lfo1Gain.connect(voice.voiceFilter.frequency);
+    } else if (this.instrument.lfo1.target === PARAMETER_IDS.FILTER_RESONANCE) {
+      this.lfo1Gain.connect(voice.voiceFilter.Q);
+    }
+
+    if (typeof this.instrument.lfo2.target === "number") {
+      if (this.instrument.lfo2.target === PARAMETER_IDS.FILTER_FREQUENCY) {
+        this.lfo2Gain.connect(voice.voiceFilter.frequency);
+      } else if (
+        this.instrument.lfo2.target === PARAMETER_IDS.FILTER_RESONANCE
+      ) {
+        this.lfo2Gain.connect(voice.voiceFilter.Q);
+      }
+    }
+
     // Update voice state
     voice.midiNote = midiNote;
     voice.startTime = this.context.currentTime;
     voice.isActive = true;
-
-    console.log("[InstrumentNode] Initialized voice:", {
-      midiNote,
-      frequency:
-        voice.oscillator instanceof OscillatorNode
-          ? voice.oscillator.frequency.value
-          : "N/A",
-      baseFilterFreq: baseFreq,
-      modulationRange,
-      envelopeAmount: this.instrument.filter.envelopeAmount,
-    });
 
     return voice.oscillator;
   }
@@ -218,13 +436,6 @@ export class InstrumentNode {
     // For filter envelope, baseValue is 0 and amount controls the modulation depth
     param.cancelScheduledValues(now);
     param.setValueAtTime(baseValue, now);
-
-    console.log("[InstrumentNode] Applying envelope:", {
-      type: envelope.type,
-      baseValue,
-      amount,
-      time: now,
-    });
 
     switch (envelope.type) {
       case "ad":
@@ -274,15 +485,6 @@ export class InstrumentNode {
     const normalizedVelocity = velocity; // MIDI velocity is 0-127 but we have it 0-1
     const velocityGain = normalizedVelocity * this.instrument.volume;
 
-    console.log("[InstrumentNode] Applying amplitude envelope:", {
-      velocity,
-      normalizedVelocity,
-      instrumentVolume: this.instrument.volume,
-      finalGain: velocityGain,
-      time: now,
-      envelopeType: envelope.type,
-    });
-
     // Cancel any previously scheduled values and reset
     gainNode.gain.cancelScheduledValues(now);
     gainNode.gain.setValueAtTime(0, now);
@@ -331,16 +533,6 @@ export class InstrumentNode {
         );
         break;
     }
-
-    console.log("[InstrumentNode] Envelope scheduled:", {
-      type: envelope.type,
-      attackTime: now + envelope.attack,
-      attackValue: velocityGain,
-      decayEndTime:
-        envelope.type !== "ar" ? now + envelope.attack + envelope.decay : null,
-      sustainLevel:
-        envelope.type === "adsr" ? velocityGain * envelope.sustain : null,
-    });
   }
 
   // Update instrument parameters
@@ -349,7 +541,42 @@ export class InstrumentNode {
     const newMaxVoices = instrument.maxVoices ?? 16;
     const oldVolume = this.instrument.volume;
 
+    // Store old LFO targets for comparison
+    const oldLfo1Target = this.instrument.lfo1.target;
+    const oldLfo2Target = this.instrument.lfo2.target;
+    const oldLfo1Depth = this.instrument.lfo1.depth;
+    const oldLfo2Depth = this.instrument.lfo2.depth;
+
     this.instrument = instrument;
+
+    // Update LFO parameters
+    const now = this.context.currentTime;
+
+    // Update LFO1
+    if (this.lfo1.type !== instrument.lfo1.waveform) {
+      this.lfo1.type = instrument.lfo1.waveform;
+    }
+
+    this.lfo1.frequency.setValueAtTime(instrument.lfo1.frequency, now);
+
+    // Update LFO2
+    if (this.lfo2.type !== instrument.lfo2.waveform) {
+      this.lfo2.type = instrument.lfo2.waveform;
+    }
+
+    this.lfo2.frequency.setValueAtTime(instrument.lfo2.frequency, now);
+
+    // Update LFO routing if targets, depths, or frequencies have changed
+    if (
+      oldLfo1Target !== instrument.lfo1.target ||
+      oldLfo2Target !== instrument.lfo2.target ||
+      oldLfo1Depth !== instrument.lfo1.depth ||
+      oldLfo2Depth !== instrument.lfo2.depth ||
+      this.lfo1.frequency.value !== instrument.lfo1.frequency ||
+      this.lfo2.frequency.value !== instrument.lfo2.frequency
+    ) {
+      this.routeLFOModulation();
+    }
 
     // Update master gain
     this.gainNode.gain.value = isFinite(instrument.volume)
@@ -422,18 +649,12 @@ export class InstrumentNode {
     // First, try to find the same note (for retrigger)
     const existingVoice = this.voicePool.find((v) => v.midiNote === midiNote);
     if (existingVoice) {
-      console.log("[InstrumentNode] Reusing voice for same note:", {
-        midiNote,
-      });
       return existingVoice;
     }
 
     // Then, try to find an inactive voice
     const inactiveVoice = this.voicePool.find((v) => !v.isActive);
     if (inactiveVoice) {
-      console.log("[InstrumentNode] Using inactive voice for note:", {
-        midiNote,
-      });
       return inactiveVoice;
     }
 
@@ -447,26 +668,19 @@ export class InstrumentNode {
       return current.startTime < oldest.startTime ? current : oldest;
     });
 
-    console.log("[InstrumentNode] Stealing oldest voice for note:", {
-      midiNote,
-      oldNote: oldestVoice.midiNote,
-      oldStartTime: oldestVoice.startTime,
-      wasInAttack:
-        oldestVoice.startTime + this.instrument.envelope.attack > now,
-    });
     return oldestVoice;
   }
 
   // Trigger note on
   noteOn(midiNote: number, velocity: number, time = 0) {
-    console.log("[InstrumentNode] Note ON:", { midiNote, velocity, time });
-
     // Get a voice from the pool
     const voice = this.getVoice(midiNote);
+    let epsilon = 0;
 
     // If voice is active, stop it immediately
     if (voice.isActive) {
       this.stopVoice(voice, time, true);
+      epsilon = 0.001;
     }
 
     // Initialize voice with new note
@@ -483,7 +697,8 @@ export class InstrumentNode {
     this.applyAmplitudeEnvelope(voice.gain, velocity, time);
 
     // Start the oscillator
-    oscillator.start(time);
+    voice.isActive = true;
+    oscillator.start(time + epsilon);
   }
 
   // Stop a specific voice
@@ -499,13 +714,6 @@ export class InstrumentNode {
       clearTimeout(voice.cleanupTimeout);
       voice.cleanupTimeout = null;
     }
-
-    console.log("[InstrumentNode] Stopping voice:", {
-      midiNote: voice.midiNote,
-      immediate,
-      time,
-      currentGain: voice.gain.gain.value,
-    });
 
     // Always cancel scheduled values first
     voice.gain.gain.cancelScheduledValues(time);
@@ -554,9 +762,32 @@ export class InstrumentNode {
       );
     }
 
-    // Mark voice as inactive but don't schedule cleanup
-    // This allows the release phase to continue playing until the voice is needed
-    voice.isActive = false;
+    // Schedule oscillator to stop after release phase
+    if (voice.oscillator) {
+      const stopTime = time + releaseTime + 0.01; // Add small buffer after release
+      try {
+        voice.oscillator.stop(stopTime);
+        // Schedule cleanup after oscillator stops
+        const timeoutMs = Math.max(
+          0,
+          (stopTime - this.context.currentTime) * 1000
+        );
+        voice.cleanupTimeout = window.setTimeout(() => {
+          if (voice.oscillator) {
+            voice.oscillator.stop();
+            voice.oscillator.disconnect();
+            voice.oscillator = null;
+          }
+          voice.isActive = false;
+          voice.midiNote = null;
+        }, timeoutMs);
+      } catch (e) {
+        console.warn("[InstrumentNode] Error scheduling oscillator stop:", e);
+      }
+    }
+
+    // Mark voice as inactive but don't disconnect nodes yet
+    // This allows the release phase to continue playing
     voice.midiNote = null;
   }
 
@@ -608,7 +839,6 @@ export class InstrumentNode {
     if (this.instrument.oscillator.type === "noise") {
       return this.createNoiseSource();
     } else if (this.instrument.oscillator.type === "sampler") {
-      console.log("[InstrumentNode] Creating sampler oscillator", this);
       if (!this.sampleBuffer) {
         if (this.instrument.oscillator.sample) {
           this.sampleBuffer = this.instrument.oscillator.sample

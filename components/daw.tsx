@@ -19,7 +19,6 @@ export default function DAW() {
   const audioEngine = useAudioEngine();
 
   const onProjectLoaded = ({ project }: { project: Project }) => {
-    console.log("[DAW] Project loaded:", project);
     setProject(project);
     setIsLoading(false);
   };
@@ -27,10 +26,6 @@ export default function DAW() {
 
   // Effect for initial setup and instrument registration
   useEffect(() => {
-    console.log("[DAW] Initial project load:", {
-      instrumentCount: project.instruments.length,
-      instruments: project.instruments.map((i) => ({ id: i.id, name: i.name })),
-    });
     audioEngine.loadProject(project);
     return () => audioEngine.stop();
   }, [audioEngine]);
@@ -38,17 +33,8 @@ export default function DAW() {
   // Effect for keeping instruments in sync
   useEffect(() => {
     let samplersChanged = false;
-    console.log("[DAW] Syncing instruments:", {
-      instrumentCount: project.instruments.length,
-      instruments: project.instruments.map((i) => ({ id: i.id, name: i.name })),
-    });
     // Re-register all instruments without stopping playback
     project.instruments.forEach((instrument) => {
-      console.log("[DAW] Registering instrument:", {
-        id: instrument.id,
-        name: instrument.name,
-        type: instrument.oscillator.type,
-      });
       audioEngine.updateInstrument(instrument.id, instrument);
       if (instrument.oscillator.type === "sampler") {
         samplersChanged = true;
@@ -58,51 +44,6 @@ export default function DAW() {
       project.sampleData = audioEngine.getSampleData();
     }
   }, [audioEngine, project.instruments]);
-
-  // Effect for keeping samples in sync
-  // useEffect(() => {
-  //   for (const [instrumentId, sample] of Object.entries(
-  //     project.sampleData ?? {}
-  //   )) {
-  //     console.log("[DAW] Syncing sample:", {
-  //       id: instrumentId,
-  //       sample: sample,
-  //     });
-  //     audioEngine.base64ToAudioBuffer(sample).then((buffer) => {
-  //       const instrument = project.instruments.find(
-  //         (instrument) => instrument.id === instrumentId
-  //       );
-  //       if (instrument) {
-  //         audioEngine.updateSample(instrumentId, buffer).then(() => {
-  //           console.log("[DAW] Updated sample:", {
-  //             id: instrumentId,
-  //             buffer: buffer,
-  //           });
-  //           const updatedInstrument = {
-  //             ...instrument,
-  //             oscillator: {
-  //               ...instrument.oscillator,
-  //               sample: {
-  //                 ...instrument.oscillator.sample,
-  //                 fileName:
-  //                   instrument.oscillator.sample?.fileName ?? "sample.wav",
-  //                 startPoint: instrument.oscillator.sample?.startPoint ?? 0,
-  //                 endPoint: instrument.oscillator.sample?.endPoint ?? 1,
-  //                 gain: instrument.oscillator.sample?.gain ?? 1,
-  //                 loopType: instrument.oscillator.sample?.loopType ?? "oneshot",
-  //                 buffer: buffer,
-  //               },
-  //             },
-  //           };
-  //           project.instruments = project.instruments.map((inst) =>
-  //             inst.id === instrumentId ? updatedInstrument : inst
-  //           );
-  //           audioEngine.updateInstrument(instrumentId, updatedInstrument);
-  //         });
-  //       }
-  //     });
-  //   }
-  // }, [audioEngine, project.sampleData]);
 
   const handleAddInstrument = () => {
     if (project.instruments.length >= 255) return;
@@ -259,7 +200,7 @@ export default function DAW() {
         ...instrument,
         oscillator: { ...instrument.oscillator, sample: undefined },
       })),
-      sampleData: audioEngine.getSampleData(),
+      sampleData: audioEngine.getSampleData(1, 22050, "f12"),
     };
     const dataStr =
       "data:text/json;charset=utf-8," +

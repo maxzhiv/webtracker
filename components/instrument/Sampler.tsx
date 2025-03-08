@@ -131,13 +131,6 @@ export default function Sampler({
         }
         ctx.lineTo(i, (1 + min) * amp);
         ctx.lineTo(i, (1 + max) * amp);
-        // console.log(
-        //   "[Sampler] Line to:",
-        //   i,
-        //   step,
-        //   (1 + min) * amp,
-        //   (1 + max) * amp
-        // );
       }
 
       ctx.stroke();

@@ -2,6 +2,11 @@
 
 // Convert MIDI note number to note name (e.g. 60 -> C-4)
 export function midiNoteToName(note: number): string {
+  // Special case for note-off event
+  if (note === 0x3d) {
+    return "=0";
+  }
+
   const NOTE_NAMES = [
     "C",
     "c",
@@ -23,6 +28,11 @@ export function midiNoteToName(note: number): string {
 
 // Convert note name to MIDI note number (e.g. C-4 -> 60)
 export function noteNameToMidi(noteName: string): number {
+  // Special case for note-off event
+  if (noteName.startsWith("=")) {
+    return 0x3d;
+  }
+
   // Handle lowercase notes as sharp of previous note
   const normalized = noteName.replace(/([a-g])/, (m) => {
     const sharpNote = {

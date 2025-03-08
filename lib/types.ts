@@ -41,15 +41,52 @@ export interface Envelope {
   release: number;
 }
 
+export type LFOWaveform = "sine" | "sawtooth" | "triangle" | "square";
+
+export type LFOTarget = number | "lfo1_frequency" | "lfo1_depth";
+
+export interface LFO {
+  waveform: LFOWaveform;
+  frequency: number; // Hz
+  depth: number; // 0-1
+  target: number; // Parameter ID from PARAMETER_IDS
+}
+
+export interface LFO2 {
+  waveform: LFOWaveform;
+  frequency: number; // Hz
+  depth: number; // 0-1
+  target: LFOTarget;
+}
+
 export interface Instrument {
   id: string;
   name: string;
-  oscillator: Oscillator;
-  filter: Filter;
+  volume: number;
+  pan: number;
+  maxVoices?: number;
+  oscillator: {
+    type: OscillatorType | "noise" | "sampler";
+    detune: number;
+    sample?: {
+      buffer?: AudioBuffer;
+      fileName?: string;
+      startPoint: number;
+      endPoint: number;
+      gain: number;
+      loopType: "oneshot" | "forward" | "pingpong";
+    };
+  };
+  filter: {
+    type: BiquadFilterType;
+    frequency: number;
+    resonance: number;
+    envelopeAmount: number;
+    envelope: Envelope;
+  };
   envelope: Envelope;
-  maxVoices?: number; // Maximum number of simultaneous voices (optional, defaults to 16)
-  volume: number; // 0 to 1
-  pan: number; // -1 to 1
+  lfo1: LFO;
+  lfo2: LFO2;
 }
 
 export interface Note {
@@ -78,113 +115,6 @@ export interface Project {
   song: string[][]; // Array of sequences, each containing pattern IDs
   sampleData?: { [key: string]: string }; // Base64 encoded sample data for sampler instruments
 }
-
-export const defaultProject: Project = {
-  name: "New Project",
-  instruments: [
-    {
-      id: "00",
-      name: "Square Lead",
-      oscillator: {
-        type: "square",
-        detune: 0,
-      },
-      filter: {
-        type: "lowpass",
-        frequency: 2000,
-        resonance: 1,
-        envelope: {
-          type: "adsr",
-          attack: 0.01,
-          decay: 0.1,
-          sustain: 0.8,
-          release: 0.2,
-        },
-        envelopeAmount: 0.5,
-      },
-      envelope: {
-        type: "adsr",
-        attack: 0.01,
-        decay: 0.1,
-        sustain: 0.5,
-        release: 0.2,
-      },
-      volume: 1,
-      pan: 0,
-    },
-    {
-      id: "01",
-      name: "Triangle Bass",
-      oscillator: {
-        type: "triangle",
-        detune: 0,
-      },
-      filter: {
-        type: "lowpass",
-        frequency: 500,
-        resonance: 2,
-        envelope: {
-          type: "ad",
-          attack: 0.05,
-          decay: 0.3,
-          sustain: 0,
-          release: 0,
-        },
-        envelopeAmount: 0.3,
-      },
-      envelope: {
-        type: "ad",
-        attack: 0.05,
-        decay: 0.5,
-        sustain: 0,
-        release: 0,
-      },
-      volume: 1,
-      pan: 0,
-    },
-    {
-      id: "02",
-      name: "Sawtooth Lead",
-      oscillator: {
-        type: "sawtooth",
-        detune: 0,
-      },
-      filter: {
-        type: "lowpass",
-        frequency: 3000,
-        resonance: 4,
-        envelope: {
-          type: "adsr",
-          attack: 0.1,
-          decay: 0.2,
-          sustain: 0.7,
-          release: 0.3,
-        },
-        envelopeAmount: 0.7,
-      },
-      envelope: {
-        type: "adsr",
-        attack: 0.02,
-        decay: 0.2,
-        sustain: 0.6,
-        release: 0.3,
-      },
-      volume: 1,
-      pan: 0,
-    },
-  ],
-  patterns: [
-    {
-      id: "00",
-      name: "Pattern 00",
-      tempo: 120,
-      tracks: 4,
-      rows: 16,
-      notes: [],
-    },
-  ],
-  song: [],
-};
 
 // Parameter IDs for real-time control
 export const PARAMETER_IDS = {
@@ -216,6 +146,18 @@ export const PARAMETER_IDS = {
   VOLUME: 0x40,
   PAN: 0x41,
   MAX_VOICES: 0x42,
+
+  // LFO1 parameters
+  LFO1_WAVEFORM: 0x50,
+  LFO1_FREQUENCY: 0x51,
+  LFO1_DEPTH: 0x52,
+  LFO1_TARGET: 0x53,
+
+  // LFO2 parameters
+  LFO2_WAVEFORM: 0x54,
+  LFO2_FREQUENCY: 0x55,
+  LFO2_DEPTH: 0x56,
+  LFO2_TARGET: 0x57,
 } as const;
 
 // Parameter value ranges and scaling
@@ -273,18 +215,343 @@ export function normalizeParameterValue(
   parameterId: number,
   value: number
 ): number {
-  const range = PARAMETER_RANGES[parameterId as keyof typeof PARAMETER_RANGES];
-  if (!range) return value;
+  switch (parameterId) {
+    // ... existing cases ...
 
-  // Handle enum types
-  if ("values" in range && typeof range.fromNormalized === "function") {
-    return range.fromNormalized(value / 255);
+    // LFO frequencies: 0.1 Hz to 20 Hz, exponential scale
+    case PARAMETER_IDS.LFO1_FREQUENCY:
+    case PARAMETER_IDS.LFO2_FREQUENCY:
+      return 0.1 * Math.pow(200, value / 255); // 0.1 Hz to 20 Hz
+
+    // LFO depths: 0 to 1, linear scale
+    case PARAMETER_IDS.LFO1_DEPTH:
+    case PARAMETER_IDS.LFO2_DEPTH:
+      return value / 255;
+
+    default:
+      return value;
   }
-
-  // Handle numeric ranges
-  if ("min" in range && "max" in range) {
-    return (value / 255) * (range.max - range.min) + range.min;
-  }
-
-  return value;
 }
+
+export const defaultProject: Project = {
+  name: "New Project",
+  instruments: [
+    {
+      id: "00",
+      name: "Square Lead",
+      oscillator: {
+        type: "square",
+        detune: 0,
+      },
+      filter: {
+        type: "lowpass",
+        frequency: 2000,
+        resonance: 1,
+        envelope: {
+          type: "adsr",
+          attack: 0.01,
+          decay: 0.1,
+          sustain: 0.8,
+          release: 0.2,
+        },
+        envelopeAmount: 0.5,
+      },
+      envelope: {
+        type: "adsr",
+        attack: 0.01,
+        decay: 0.1,
+        sustain: 0.5,
+        release: 0.2,
+      },
+      lfo1: {
+        waveform: "sine",
+        frequency: 1,
+        depth: 0,
+        target: PARAMETER_IDS.FILTER_FREQUENCY,
+      },
+      lfo2: {
+        waveform: "sine",
+        frequency: 1,
+        depth: 0,
+        target: PARAMETER_IDS.FILTER_FREQUENCY,
+      },
+
+      volume: 1,
+      pan: 0,
+    },
+    {
+      id: "01",
+      name: "Triangle Bass",
+      oscillator: {
+        type: "triangle",
+        detune: 0,
+      },
+      filter: {
+        type: "lowpass",
+        frequency: 500,
+        resonance: 2,
+        envelope: {
+          type: "ad",
+          attack: 0.05,
+          decay: 0.3,
+          sustain: 0,
+          release: 0,
+        },
+        envelopeAmount: 0.3,
+      },
+      envelope: {
+        type: "ad",
+        attack: 0.05,
+        decay: 0.5,
+        sustain: 0,
+        release: 0,
+      },
+      lfo1: {
+        waveform: "sine",
+        frequency: 1,
+        depth: 0,
+        target: PARAMETER_IDS.FILTER_FREQUENCY,
+      },
+      lfo2: {
+        waveform: "sine",
+        frequency: 1,
+        depth: 0,
+        target: PARAMETER_IDS.FILTER_FREQUENCY,
+      },
+
+      volume: 1,
+      pan: 0,
+    },
+    {
+      id: "02",
+      name: "Sawtooth Lead",
+      oscillator: {
+        type: "sawtooth",
+        detune: 0,
+      },
+      filter: {
+        type: "lowpass",
+        frequency: 3000,
+        resonance: 4,
+        envelope: {
+          type: "adsr",
+          attack: 0.1,
+          decay: 0.2,
+          sustain: 0.7,
+          release: 0.3,
+        },
+        envelopeAmount: 0.7,
+      },
+      envelope: {
+        type: "adsr",
+        attack: 0.02,
+        decay: 0.2,
+        sustain: 0.6,
+        release: 0.3,
+      },
+      lfo1: {
+        waveform: "sine",
+        frequency: 1,
+        depth: 0,
+        target: PARAMETER_IDS.FILTER_FREQUENCY,
+      },
+      lfo2: {
+        waveform: "sine",
+        frequency: 1,
+        depth: 0,
+        target: PARAMETER_IDS.FILTER_FREQUENCY,
+      },
+      volume: 1,
+      pan: 0,
+    },
+  ],
+  patterns: [
+    {
+      id: "00",
+      name: "Pattern 00",
+      tempo: 120,
+      tracks: 4,
+      rows: 16,
+      notes: [],
+    },
+  ],
+  song: [],
+};
+
+export function createDefaultInstrument(id: string): Instrument {
+  return {
+    id,
+    name: "New Instrument",
+    oscillator: {
+      type: "square",
+      detune: 0,
+    },
+    filter: {
+      type: "lowpass",
+      frequency: 1000,
+      resonance: 1,
+      envelopeAmount: 0,
+      envelope: {
+        type: "adsr",
+        attack: 0.01,
+        decay: 0.1,
+        sustain: 0.5,
+        release: 0.1,
+      },
+    },
+    envelope: {
+      type: "adsr",
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.5,
+      release: 0.1,
+    },
+    volume: 1,
+    pan: 0,
+    maxVoices: 16,
+    lfo1: {
+      waveform: "sine",
+      frequency: 1,
+      depth: 0,
+      target: PARAMETER_IDS.FILTER_FREQUENCY,
+    },
+    lfo2: {
+      waveform: "sine",
+      frequency: 1,
+      depth: 0,
+      target: PARAMETER_IDS.OSCILLATOR_DETUNE,
+    },
+  };
+}
+
+export const DEFAULT_INSTRUMENTS: Instrument[] = [
+  {
+    id: "square-lead",
+    name: "Square Lead",
+    oscillator: {
+      type: "square",
+      detune: 0,
+    },
+    filter: {
+      type: "lowpass",
+      frequency: 1000,
+      resonance: 1,
+      envelopeAmount: 0,
+      envelope: {
+        type: "adsr",
+        attack: 0.01,
+        decay: 0.1,
+        sustain: 0.5,
+        release: 0.1,
+      },
+    },
+    envelope: {
+      type: "adsr",
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.5,
+      release: 0.1,
+    },
+    volume: 1,
+    pan: 0,
+    maxVoices: 16,
+    lfo1: {
+      waveform: "sine",
+      frequency: 1,
+      depth: 0,
+      target: PARAMETER_IDS.FILTER_FREQUENCY,
+    },
+    lfo2: {
+      waveform: "sine",
+      frequency: 1,
+      depth: 0,
+      target: PARAMETER_IDS.OSCILLATOR_DETUNE,
+    },
+  },
+  {
+    id: "triangle-pad",
+    name: "Triangle Pad",
+    oscillator: {
+      type: "triangle",
+      detune: 0,
+    },
+    filter: {
+      type: "lowpass",
+      frequency: 1000,
+      resonance: 1,
+      envelopeAmount: 0,
+      envelope: {
+        type: "ad",
+        attack: 0.5,
+        decay: 1,
+        sustain: 0,
+        release: 0,
+      },
+    },
+    envelope: {
+      type: "ad",
+      attack: 0.5,
+      decay: 1,
+      sustain: 0,
+      release: 0,
+    },
+    volume: 1,
+    pan: 0,
+    maxVoices: 16,
+    lfo1: {
+      waveform: "sine",
+      frequency: 0.5,
+      depth: 0.2,
+      target: PARAMETER_IDS.FILTER_FREQUENCY,
+    },
+    lfo2: {
+      waveform: "triangle",
+      frequency: 0.25,
+      depth: 0.1,
+      target: PARAMETER_IDS.PAN,
+    },
+  },
+  {
+    id: "sawtooth-bass",
+    name: "Sawtooth Bass",
+    oscillator: {
+      type: "sawtooth",
+      detune: 0,
+    },
+    filter: {
+      type: "lowpass",
+      frequency: 1000,
+      resonance: 1,
+      envelopeAmount: 0,
+      envelope: {
+        type: "adsr",
+        attack: 0.01,
+        decay: 0.1,
+        sustain: 0.5,
+        release: 0.1,
+      },
+    },
+    envelope: {
+      type: "adsr",
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.5,
+      release: 0.1,
+    },
+    volume: 1,
+    pan: 0,
+    maxVoices: 16,
+    lfo1: {
+      waveform: "sine",
+      frequency: 6,
+      depth: 0.3,
+      target: PARAMETER_IDS.FILTER_FREQUENCY,
+    },
+    lfo2: {
+      waveform: "square",
+      frequency: 2,
+      depth: 0.1,
+      target: "lfo1_depth",
+    },
+  },
+];

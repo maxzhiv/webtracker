@@ -18,6 +18,11 @@ export class PlaybackScheduler {
   private scheduleAheadTime = 0.1;
   private lookahead = 25; // ms
   private events: EventSystem;
+  // Keep track of last note per track across rows
+  private lastNotePerTrack = new Map<
+    number,
+    { instrument: string; tone: number }
+  >();
 
   constructor(
     audioContext: AudioContext,
@@ -49,7 +54,6 @@ export class PlaybackScheduler {
   // Update pattern in real-time
   updatePattern(pattern: Pattern) {
     if (this.currentPattern?.id === pattern.id) {
-      console.log("[AudioEngine] Updating current pattern:", pattern.id);
       this.currentPattern = pattern;
       this.tempo = pattern.tempo;
     } else if (this.currentSong) {
@@ -58,7 +62,6 @@ export class PlaybackScheduler {
         (p) => p.id === pattern.id
       );
       if (patternIndex !== -1) {
-        console.log("[AudioEngine] Updating pattern in song:", pattern.id);
         this.currentSong.patterns[patternIndex] = pattern;
         // Update tempo if this is the current pattern in sequence
         const currentSequence = this.currentSong.sequence[this.currentSequence];
@@ -99,22 +102,6 @@ export class PlaybackScheduler {
       return;
     }
 
-    console.log("[AudioEngine] Starting playback...");
-    if (this.currentPattern) {
-      console.log(
-        "[AudioEngine] Playing pattern with",
-        this.currentPattern.notes.length,
-        "notes"
-      );
-      console.log("[AudioEngine] Pattern tempo:", this.currentPattern.tempo);
-    } else if (this.currentSong) {
-      console.log(
-        "[AudioEngine] Playing song with",
-        this.currentSong.sequence.length,
-        "sequences"
-      );
-    }
-
     this.isPlaying = true;
     this.currentRow = 0;
     this.currentSequence = 0;
@@ -138,6 +125,9 @@ export class PlaybackScheduler {
     this.instruments.forEach((instrument) => {
       instrument.releaseAll();
     });
+
+    // Clear the last note tracking when stopping
+    this.lastNotePerTrack.clear();
 
     this.events.emit("playStop");
   }
@@ -194,13 +184,7 @@ export class PlaybackScheduler {
       });
     }
 
-    if (notesToSchedule.length > 0) {
-      console.log(
-        `[AudioEngine] Scheduling ${notesToSchedule.length} notes at row ${this.currentRow}`
-      );
-    }
-
-    // Play the scheduled notes
+    // First pass: Process note-on events
     notesToSchedule.forEach((note) => {
       const instrument = this.instruments.get(note.instrument);
       if (!instrument) {
@@ -208,18 +192,33 @@ export class PlaybackScheduler {
         return;
       }
 
+      // Skip note-off events and parameter control notes in first pass
+      if (note.tone === 0x3d || note.effect === 0xff) {
+        return;
+      }
+
+      // Regular note playback
+      if (note.velocity > 0) {
+        const velocity = note.velocity / 255;
+        instrument.noteOn(note.tone, velocity, this.nextNoteTime);
+
+        // Store this note as the last note played on this track
+        this.lastNotePerTrack.set(note.track, {
+          instrument: note.instrument,
+          tone: note.tone,
+        });
+      }
+    });
+
+    // Second pass: Process note-off events and parameter control notes
+    notesToSchedule.forEach((note) => {
+      const instrument = this.instruments.get(note.instrument);
+      if (!instrument) return;
+
       // Handle parameter control notes (effect FF)
       if (note.effect === 0xff) {
         const parameterId = (note.effectValue >> 8) & 0xff; // High byte is parameter ID
         const parameterValue = note.effectValue & 0xff; // Low byte is parameter value
-
-        console.log(
-          `[AudioEngine] Parameter control: instrument=${
-            note.instrument
-          }, param=${parameterId.toString(16)}, value=${parameterValue.toString(
-            16
-          )}`
-        );
 
         // Get the normalized parameter value
         const normalizedValue = normalizeParameterValue(
@@ -321,15 +320,29 @@ export class PlaybackScheduler {
         return;
       }
 
-      // Regular note playback
-      if (note.velocity > 0) {
-        const velocity = note.velocity / 255;
-        console.log(
-          `[AudioEngine] Playing note: instrument=${note.instrument}, tone=${note.tone}, velocity=${velocity}`
-        );
-        instrument.noteOn(note.tone, velocity, this.nextNoteTime);
-
-        // Remove automatic note-off scheduling to allow natural release
+      // Handle note-off events (tone === 0x3D, which is '=' in ASCII)
+      if (note.tone === 0x3d) {
+        // Look up the last note played on this track
+        const lastNote = this.lastNotePerTrack.get(note.track);
+        if (lastNote && lastNote.instrument === note.instrument) {
+          const targetInstrument = this.instruments.get(lastNote.instrument);
+          if (targetInstrument) {
+            // Add a small offset to ensure note-off happens after note-on
+            const noteOffTime = this.nextNoteTime + 0.001;
+            targetInstrument.noteOff(lastNote.tone, noteOffTime);
+            // Clear the last note for this track after stopping it
+            this.lastNotePerTrack.delete(note.track);
+          }
+        } else {
+          console.warn(
+            `[AudioEngine] No matching note found for note-off event:`,
+            {
+              track: note.track,
+              instrument: note.instrument,
+              lastNoteMap: Array.from(this.lastNotePerTrack.entries()),
+            }
+          );
+        }
       }
     });
 

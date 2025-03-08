@@ -5,12 +5,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 import type { Instrument } from "@/lib/types";
+import { PARAMETER_IDS } from "@/lib/types";
 import Oscillator from "./instrument/Oscillator";
 import Filter from "./instrument/Filter";
 import Envelope from "./instrument/Envelope";
 import { useAudioEngine } from "@/lib/audio-engine";
 import { Knob } from "@/components/ui/knob";
 import Keyboard from "./instrument/Keyboard";
+import LFO from "./instrument/LFO";
+
 interface InstrumentEditorProps {
   instruments: Instrument[];
   onAddInstrument: () => void;
@@ -130,10 +133,28 @@ export default function InstrumentEditor({
             type: "square",
             detune: 0,
           };
+        } else if (category === "lfo1") {
+          updatedInstrument.lfo1 = {
+            waveform: "sine",
+            frequency: 1,
+            depth: 0,
+            target: PARAMETER_IDS.FILTER_FREQUENCY,
+          };
+        } else if (category === "lfo2") {
+          updatedInstrument.lfo2 = {
+            waveform: "sine",
+            frequency: 1,
+            depth: 0,
+            target: PARAMETER_IDS.OSCILLATOR_DETUNE,
+          };
         }
       }
 
-      if (property.includes(".")) {
+      // Handle direct property updates
+      if (category === "lfo1" || category === "lfo2") {
+        const lfo = updatedInstrument[category];
+        (lfo as any)[property] = value;
+      } else if (property.includes(".")) {
         const [subCategory, subProperty] = property.split(".") as [
           string,
           string
@@ -389,6 +410,16 @@ export default function InstrumentEditor({
                       }
                       label="Filter Envelope"
                       prefix="filter.envelope"
+                      onChangeParameter={handleParameterChange}
+                    />
+                    <LFO
+                      lfo={instruments[selectedInstrumentIndex].lfo1}
+                      index={1}
+                      onChangeParameter={handleParameterChange}
+                    />
+                    <LFO
+                      lfo={instruments[selectedInstrumentIndex].lfo2}
+                      index={2}
                       onChangeParameter={handleParameterChange}
                     />
                   </div>

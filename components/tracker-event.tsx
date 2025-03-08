@@ -124,7 +124,7 @@ export default function TrackerEvent({
             case 1: // Velocity
               return /[0-9A-F]/.test(upperChar);
             case 2: // Note
-              return /[A-Ga-g]/.test(char);
+              return /[A-Gacdfg=]/.test(char);
             case 3: // Octave
               return /[0-9]/.test(upperChar);
             case 4: // Effect

@@ -45,14 +45,12 @@ export class AudioEngine {
 
     if (!this.instruments.has(instrumentId)) {
       // Create new instrument if it doesn't exist
-      console.log("[AudioEngine] Creating new instrument node");
       this.instruments.set(
         instrumentId,
         new InstrumentNode(this.audioContext, this.masterGain!, instrument)
       );
     } else {
       // Update existing instrument
-      console.log("[AudioEngine] Updating existing instrument node");
       const instrumentNode = this.instruments.get(instrumentId);
       if (instrumentNode) {
         instrumentNode.updateInstrument(instrument);
@@ -68,12 +66,6 @@ export class AudioEngine {
     }
     if (!this.audioContext) return;
 
-    console.log(
-      "[AudioEngine] Loading project with",
-      project.instruments.length,
-      "instruments"
-    );
-
     // Store current playback state
     const wasPlaying = this.scheduler?.isPlaying;
     if (wasPlaying) {
@@ -86,12 +78,7 @@ export class AudioEngine {
 
     // Load sample data first if present
     if (project.sampleData) {
-      console.log("[AudioEngine] Loading sample data...");
       await this.loadSampleData(project.sampleData);
-      console.log(
-        "[AudioEngine] Sample data loaded:",
-        Array.from(this.samples.entries())
-      );
     }
 
     // Update or create instrument nodes as needed
@@ -99,12 +86,6 @@ export class AudioEngine {
 
     // First pass: create all instrument nodes
     for (const instrument of project.instruments) {
-      console.log("[AudioEngine] Setting up instrument:", {
-        id: instrument.id,
-        name: instrument.name,
-        type: instrument.oscillator.type,
-      });
-
       const node = new InstrumentNode(
         this.audioContext!,
         this.masterGain!,
@@ -115,10 +96,6 @@ export class AudioEngine {
       if (instrument.oscillator.type === "sampler") {
         const sampleBuffer = this.samples.get(instrument.id);
         if (sampleBuffer) {
-          console.log(
-            `[AudioEngine] Setting sample buffer for instrument ${instrument.id}`,
-            sampleBuffer
-          );
           node.sampleBuffer = sampleBuffer;
         } else {
           console.warn(
@@ -133,7 +110,6 @@ export class AudioEngine {
     // Replace instruments map
     this.instruments.clear();
     newInstruments.forEach((node, id) => {
-      console.log("[AudioEngine] Setting up instrument node:", node, id);
       this.instruments.set(id, node);
     });
     project.instruments = Array.from(newInstruments.values()).map((node) => {
@@ -143,17 +119,12 @@ export class AudioEngine {
       }
       return instrument;
     });
-    console.log(
-      "[AudioEngine] Registered instruments:",
-      Array.from(this.instruments.entries())
-    );
 
     // Restore playback state if was playing
     if (wasPlaying) {
       this.scheduler?.play();
     }
 
-    console.log("[AudioEngine] Emitting project loaded event", project);
     this.events.emit("projectLoaded", { project });
   }
 
@@ -179,7 +150,6 @@ export class AudioEngine {
 
     // Convert to base64
     const jsonStr = JSON.stringify(wavData);
-    console.log("[AudioEngine] Base64 data:", wavData);
     return btoa(jsonStr);
   }
 
@@ -200,12 +170,9 @@ export class AudioEngine {
 
     // Fill channels with data
     for (let i = 0; i < wavData.numChannels; i++) {
-      console.log("[AudioEngine] dec Copying channel data:", i);
       const f32Array = Float32Array.from(Object.values(wavData.channelData[i]));
       audioBuffer.copyToChannel(f32Array, i);
     }
-
-    console.log("[AudioEngine] Audio buffer decoded:", wavData, audioBuffer);
 
     return audioBuffer;
   }
@@ -214,9 +181,7 @@ export class AudioEngine {
   async loadSample(instrumentId: string, file: File): Promise<void> {
     try {
       const arrayBuffer = await file.arrayBuffer();
-      console.log("[AudioEngine] Decoding audio data...", arrayBuffer);
       const audioBuffer = await this.audioContext!.decodeAudioData(arrayBuffer);
-      console.log("[AudioEngine] Audio buffer decoded:", audioBuffer);
       // Store both AudioBuffer and base64 data
       this.samples.set(instrumentId, audioBuffer);
       const base64Data = this.audioBufferToBase64(audioBuffer);
@@ -246,7 +211,6 @@ export class AudioEngine {
 
       // Emit sample loaded event
       this.events.emit("sampleLoaded", { instrumentId, buffer: audioBuffer });
-      console.log(`[AudioEngine] Loaded sample for instrument ${instrumentId}`);
     } catch (error) {
       console.error(
         `[AudioEngine] Failed to load sample for instrument ${instrumentId}:`,
@@ -257,7 +221,118 @@ export class AudioEngine {
   }
 
   // Get serializable sample data for project export
-  public getSampleData(): { [key: string]: string } {
+  public getSampleData(
+    channels: number = 2,
+    sampleRate: number = 44100,
+    format: "i8" | "f12" | "f16" | "f32" = "f32"
+  ): { [key: string]: string } {
+    // Handle mono conversion if requested
+    const processBuffer = (buffer: AudioBuffer): AudioBuffer => {
+      let processedBuffer = buffer;
+
+      // Convert to mono if requested
+      if (channels === 1 && buffer.numberOfChannels > 1) {
+        const monoBuffer = this.audioContext!.createBuffer(
+          1,
+          buffer.length,
+          buffer.sampleRate
+        );
+        const monoData = monoBuffer.getChannelData(0);
+
+        // Mix down to mono
+        for (let i = 0; i < buffer.length; i++) {
+          let sum = 0;
+          for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+            sum += buffer.getChannelData(channel)[i];
+          }
+          monoData[i] = sum / buffer.numberOfChannels;
+        }
+        processedBuffer = monoBuffer;
+      }
+
+      // Resample if needed
+      if (sampleRate < processedBuffer.sampleRate) {
+        const ratio = sampleRate / processedBuffer.sampleRate;
+        const newLength = Math.floor(processedBuffer.length * ratio);
+        const resampledBuffer = this.audioContext!.createBuffer(
+          processedBuffer.numberOfChannels,
+          newLength,
+          sampleRate
+        );
+
+        for (
+          let channel = 0;
+          channel < processedBuffer.numberOfChannels;
+          channel++
+        ) {
+          const inputData = processedBuffer.getChannelData(channel);
+          const outputData = resampledBuffer.getChannelData(channel);
+
+          for (let i = 0; i < newLength; i++) {
+            const pos = i / ratio;
+            const index = Math.floor(pos);
+            const fraction = pos - index;
+
+            // Linear interpolation
+            const a = inputData[index];
+            const b =
+              inputData[Math.min(index + 1, processedBuffer.length - 1)];
+            outputData[i] = a + fraction * (b - a);
+          }
+        }
+        processedBuffer = resampledBuffer;
+      }
+
+      // Convert sample format
+      for (
+        let channel = 0;
+        channel < processedBuffer.numberOfChannels;
+        channel++
+      ) {
+        const data = processedBuffer.getChannelData(channel);
+
+        switch (format) {
+          case "i8":
+            // Convert to 8-bit integer (-128 to 127)
+            for (let i = 0; i < data.length; i++) {
+              data[i] = Math.max(-1, Math.min(1, data[i])) * 127;
+            }
+            break;
+
+          case "f12":
+            // Convert to 12-bit float (-1 to 1, quantized)
+            for (let i = 0; i < data.length; i++) {
+              data[i] = Math.round(data[i] * 2047) / 2047;
+            }
+            break;
+
+          case "f16":
+            // Convert to 16-bit float (-1 to 1, quantized)
+            for (let i = 0; i < data.length; i++) {
+              data[i] = Math.round(data[i] * 32767) / 32767;
+            }
+            break;
+
+          case "f32":
+            // Already in f32 format
+            break;
+        }
+      }
+
+      return processedBuffer;
+    };
+
+    if (channels !== 2 || sampleRate !== 44100 || format !== "f32") {
+      this.samples.forEach((audioBuffer, instrumentId) => {
+        const processedBuffer = processBuffer(audioBuffer);
+        this.samples.set(instrumentId, processedBuffer);
+        this.sampleData.set(
+          instrumentId,
+          this.audioBufferToBase64(processedBuffer)
+        );
+      });
+    }
+
     const data: { [key: string]: string } = {};
     this.sampleData.forEach((base64Data, instrumentId) => {
       data[instrumentId] = base64Data;
@@ -290,9 +365,6 @@ export class AudioEngine {
           }
         }
 
-        console.log(
-          `[AudioEngine] Restored sample for instrument ${instrumentId}`
-        );
         this.events.emit("sampleLoaded", {
           instrumentId,
           buffer: audioBuffer,
@@ -325,7 +397,6 @@ export class AudioEngine {
   }
 
   public updatePattern(pattern: Pattern) {
-    console.log("[AudioEngine] Updating pattern:", pattern);
     this.scheduler?.updatePattern(pattern);
   }
 
