@@ -329,9 +329,7 @@ export class PlaybackScheduler {
         );
         instrument.noteOn(note.tone, velocity, this.nextNoteTime);
 
-        // Schedule note off based on envelope
-        const duration = this.getNoteDuration();
-        instrument.noteOff(note.tone, this.nextNoteTime + duration);
+        // Remove automatic note-off scheduling to allow natural release
       }
     });
 

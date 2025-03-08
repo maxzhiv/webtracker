@@ -199,12 +199,12 @@ export default function TrackerEvent({
         ))}
         {isEditing && (
           <span
-            className="absolute bg-transparent border border-white -ml-[1px]"
+            className="absolute bg-transparent border border-gray-400 -ml-[1px]"
             style={{
-              left: `${caretPosition * 0.61}em`,
+              left: `${0.34 + caretPosition * 0.61}em`,
               height: "1.2em",
-              width: "0.61em",
-              top: "0.1em",
+              width: "0.7em",
+              top: "0.3em",
             }}
           />
         )}

@@ -437,14 +437,22 @@ export class InstrumentNode {
       return inactiveVoice;
     }
 
-    // Finally, steal the oldest voice
-    const oldestVoice = this.voicePool.reduce((oldest, current) =>
-      current.startTime < oldest.startTime ? current : oldest
-    );
+    // Finally, steal the oldest voice that's not in its attack phase
+    const now = this.context.currentTime;
+    const oldestVoice = this.voicePool.reduce((oldest, current) => {
+      // Skip voices in attack phase
+      if (current.startTime + this.instrument.envelope.attack > now) {
+        return oldest;
+      }
+      return current.startTime < oldest.startTime ? current : oldest;
+    });
+
     console.log("[InstrumentNode] Stealing oldest voice for note:", {
       midiNote,
       oldNote: oldestVoice.midiNote,
       oldStartTime: oldestVoice.startTime,
+      wasInAttack:
+        oldestVoice.startTime + this.instrument.envelope.attack > now,
     });
     return oldestVoice;
   }
@@ -546,24 +554,10 @@ export class InstrumentNode {
       );
     }
 
-    // Schedule cleanup with precise timing
-    const cleanupTime = time + releaseTime;
-    const timeoutDelay = (cleanupTime - this.context.currentTime) * 1000;
-
-    voice.cleanupTimeout = setTimeout(() => {
-      if (voice.oscillator) {
-        try {
-          voice.oscillator.stop(cleanupTime);
-          voice.oscillator.disconnect();
-        } catch (e) {
-          console.warn("[InstrumentNode] Error cleaning up oscillator:", e);
-        }
-      }
-      voice.isActive = false;
-      voice.midiNote = null;
-      voice.oscillator = null;
-      voice.cleanupTimeout = null;
-    }, timeoutDelay) as unknown as number;
+    // Mark voice as inactive but don't schedule cleanup
+    // This allows the release phase to continue playing until the voice is needed
+    voice.isActive = false;
+    voice.midiNote = null;
   }
 
   // Trigger note off
