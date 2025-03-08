@@ -10,7 +10,7 @@ import Filter from "./instrument/Filter";
 import Envelope from "./instrument/Envelope";
 import { useAudioEngine } from "@/lib/audio-engine";
 import { Knob } from "@/components/ui/knob";
-
+import Keyboard from "./instrument/Keyboard";
 interface InstrumentEditorProps {
   instruments: Instrument[];
   onAddInstrument: () => void;
@@ -386,6 +386,11 @@ export default function InstrumentEditor({
                       onChangeParameter={handleParameterChange}
                     />
                   </div>
+                  <Keyboard
+                    instrumentId={instruments[selectedInstrumentIndex].id}
+                    instrument={instruments[selectedInstrumentIndex]}
+                    onChangeParameter={handleParameterChange}
+                  />
                 </CardContent>
               </Card>
             </div>
