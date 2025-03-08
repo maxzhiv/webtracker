@@ -116,22 +116,11 @@ export function parseNoteString(noteStr: string): {
 
   const instrument = normalized.substring(0, 2);
   const velocity = parseInt(normalized.substring(2, 4), 16);
-
-  // Find where the note name ends (it will be followed by a number)
-  let noteEndIndex = 4;
-  while (
-    noteEndIndex < normalized.length &&
-    isNaN(parseInt(normalized[noteEndIndex]))
-  ) {
-    noteEndIndex++;
-  }
-  if (noteEndIndex >= normalized.length) throw new Error("Invalid note format");
-
-  const noteName = normalized.substring(4, noteEndIndex + 1);
+  const noteName = normalized.substring(4, 6);
   const tone = noteNameToMidi(noteName);
 
   // Parse effect and effect value if present
-  const remainingStr = normalized.substring(noteEndIndex + 1);
+  const remainingStr = normalized.substring(6);
   const effect =
     remainingStr.length >= 2 ? parseInt(remainingStr.substring(0, 2), 16) : 0;
   const effectValue =

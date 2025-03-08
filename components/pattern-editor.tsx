@@ -17,6 +17,7 @@ import { Plus, Trash2, Play, Square } from "lucide-react";
 import type { Pattern, Instrument, Note } from "@/lib/types";
 import type { AudioEngine } from "@/lib/audio-engine";
 import { midiNoteToName, formatNote, parseNoteString } from "@/lib/utils";
+import TrackerEvent from "./tracker-event";
 
 interface PatternEditorProps {
   patterns: Pattern[];
@@ -47,6 +48,7 @@ export default function PatternEditor({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentRow, setCurrentRow] = useState(-1);
+  const [caretPosition, setCaretPosition] = useState(0);
 
   const currentPattern = patterns[currentPatternIndex] || null;
 
@@ -251,7 +253,7 @@ export default function PatternEditor({
     ][Math.trunc(note.velocity / 32)];
 
     return (
-      <div className="flex flex-col text-xs">
+      <div className="flex flex-row text-xs">
         <span className="font-monospace">
           <span className={instrumentColor}>{note.instrument}</span>
           <span className={velocityColor}>
@@ -264,6 +266,63 @@ export default function PatternEditor({
         {/* <span className="opacity-70 truncate">{instrumentName}</span> */}
       </div>
     );
+  };
+
+  // Handle navigation in the pattern grid
+  const handleNavigate = (direction: "up" | "down" | "left" | "right") => {
+    if (!editingCell || !currentPattern) return;
+
+    const { row, track } = editingCell;
+    let newRow = row;
+    let newTrack = track;
+
+    switch (direction) {
+      case "up":
+        newRow = row === 0 ? currentPattern.rows - 1 : row - 1;
+        break;
+      case "down":
+        newRow = row === currentPattern.rows - 1 ? 0 : row + 1;
+        break;
+      case "left":
+        if (track === 0) {
+          newTrack = currentPattern.tracks - 1;
+          newRow = row === 0 ? currentPattern.rows - 1 : row - 1;
+        } else {
+          newTrack = track - 1;
+        }
+        break;
+      case "right":
+        if (track === currentPattern.tracks - 1) {
+          newTrack = 0;
+          newRow = row === currentPattern.rows - 1 ? 0 : row + 1;
+        } else {
+          newTrack = track + 1;
+        }
+        break;
+    }
+
+    setEditingCell({ row: newRow, track: newTrack });
+  };
+
+  const handleNoteChange = (row: number, track: number, note: Note | null) => {
+    if (!currentPattern) return;
+
+    const updatedNotes = currentPattern.notes.filter(
+      (n) => !(n.row === row && n.track === track)
+    );
+
+    if (note) {
+      note.row = row;
+      note.track = track;
+      updatedNotes.push(note);
+    }
+
+    const updatedPattern = {
+      ...currentPattern,
+      notes: updatedNotes,
+    };
+
+    onUpdatePattern(currentPatternIndex, updatedPattern);
   };
 
   return (
@@ -444,7 +503,7 @@ export default function PatternEditor({
                               : "bg-gray-900"
                           } hover:bg-gray-700`}
                         >
-                          <div className="w-12 p-2 text-center border-r border-gray-700">
+                          <div className="w-12 p-0 text-center border-r border-gray-700">
                             {rowIndex
                               .toString(16)
                               .padStart(2, "0")
@@ -454,28 +513,35 @@ export default function PatternEditor({
                             (_, trackIndex) => (
                               <div
                                 key={trackIndex}
-                                className="flex-1 p-2 border-r border-gray-700 cursor-pointer"
-                                onClick={() =>
-                                  handleCellClick(rowIndex, trackIndex)
-                                }
+                                className="flex-1 p-0 border-r border-gray-700 cursor-pointer"
                               >
-                                {editingCell &&
-                                editingCell.row === rowIndex &&
-                                editingCell.track === trackIndex ? (
-                                  <Input
-                                    ref={inputRef}
-                                    value={editValue}
-                                    onChange={(e) =>
-                                      setEditValue(e.target.value)
-                                    }
-                                    onBlur={handleCellBlur}
-                                    onKeyDown={handleKeyDown}
-                                    className="h-8 p-1 text-xs"
-                                    maxLength={12}
-                                  />
-                                ) : (
-                                  getCellContent(rowIndex, trackIndex)
-                                )}
+                                <TrackerEvent
+                                  note={
+                                    currentPattern.notes.find(
+                                      (n) =>
+                                        n.row === rowIndex &&
+                                        n.track === trackIndex
+                                    ) || null
+                                  }
+                                  isEditing={
+                                    editingCell?.row === rowIndex &&
+                                    editingCell?.track === trackIndex
+                                  }
+                                  onNoteChange={(note) =>
+                                    handleNoteChange(rowIndex, trackIndex, note)
+                                  }
+                                  onNavigate={handleNavigate}
+                                  onStartEdit={() =>
+                                    setEditingCell({
+                                      row: rowIndex,
+                                      track: trackIndex,
+                                    })
+                                  }
+                                  onFinishEdit={() => setEditingCell(null)}
+                                  maxInstruments={instruments.length}
+                                  caretPosition={caretPosition}
+                                  onCaretPositionChange={setCaretPosition}
+                                />
                               </div>
                             )
                           )}
