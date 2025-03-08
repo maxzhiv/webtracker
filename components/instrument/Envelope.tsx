@@ -50,7 +50,7 @@ export default function Envelope({
       </div>
       <div className="grid grid-cols-1 gap-0">
         <div className="flex items-center">
-          <label className="mr-2">ATK</label>
+          <label className="mr-2">A</label>
           <Knob
             value={getKnobValue(envelope.attack, 0.01)}
             min={0.001}
@@ -64,7 +64,7 @@ export default function Envelope({
         </div>
         {(envelope.type === "ad" || envelope.type === "adsr") && (
           <div className="flex items-center">
-            <label className="mr-2">DEC</label>
+            <label className="mr-2">D</label>
             <Knob
               value={getKnobValue(envelope.decay, 0.1)}
               min={0.001}
@@ -79,7 +79,7 @@ export default function Envelope({
         )}
         {envelope.type === "adsr" && (
           <div className="flex items-center">
-            <label className="mr-2">SUS</label>
+            <label className="mr-2">S</label>
             <Knob
               value={getKnobValue(envelope.sustain, 0)}
               min={0}
@@ -94,7 +94,7 @@ export default function Envelope({
         )}
         {(envelope.type === "ar" || envelope.type === "adsr") && (
           <div className="flex items-center">
-            <label className="mr-2">REL</label>
+            <label className="mr-2">R</label>
             <Knob
               value={getKnobValue(envelope.release, 0.1)}
               min={0.001}

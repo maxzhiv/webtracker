@@ -9,6 +9,7 @@ import Oscillator from "./instrument/Oscillator";
 import Filter from "./instrument/Filter";
 import Envelope from "./instrument/Envelope";
 import { useAudioEngine } from "@/lib/audio-engine";
+import { Knob } from "@/components/ui/knob";
 
 interface InstrumentEditorProps {
   instruments: Instrument[];
@@ -289,20 +290,71 @@ export default function InstrumentEditor({
           {instruments.length > 0 && (
             <div className="flex-1">
               <Card>
-                <CardHeader>
-                  <CardTitle>
-                    <input
-                      type="text"
-                      className="bg-transparent border-none outline-none w-full"
-                      value={instruments[selectedInstrumentIndex].name}
-                      onChange={(e) =>
-                        handleParameterChange("name", e.target.value)
-                      }
-                    />
-                  </CardTitle>
-                </CardHeader>
                 <CardContent>
                   <div className="flex flex-row gap-2">
+                    <div className="flex flex-col gap-2">
+                      <input
+                        type="text"
+                        className="bg-transparent border-none outline-none w-28"
+                        value={instruments[selectedInstrumentIndex].name}
+                        onChange={(e) =>
+                          handleParameterChange("name", e.target.value)
+                        }
+                      />
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-muted-foreground">
+                          Voices:
+                        </label>
+                        <input
+                          type="number"
+                          className="w-16 bg-background border rounded px-2 py-1"
+                          min={1}
+                          max={32}
+                          value={
+                            instruments[selectedInstrumentIndex].maxVoices ?? 16
+                          }
+                          onChange={(e) =>
+                            handleParameterChange(
+                              "maxVoices",
+                              Math.max(
+                                1,
+                                Math.min(32, parseInt(e.target.value) || 16)
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex flex-col items-center">
+                          <label className="text-sm text-muted-foreground">
+                            Volume
+                          </label>
+                          <Knob
+                            value={instruments[selectedInstrumentIndex].volume}
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            onChange={(value) =>
+                              handleParameterChange("volume", value)
+                            }
+                          />
+                        </div>
+                        <div className="flex flex-col items-center">
+                          <label className="text-sm text-muted-foreground">
+                            Pan
+                          </label>
+                          <Knob
+                            value={instruments[selectedInstrumentIndex].pan}
+                            min={-1}
+                            max={1}
+                            step={0.01}
+                            onChange={(value) =>
+                              handleParameterChange("pan", value)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
                     <div className="space-y-6">
                       <Oscillator
                         instrumentId={instruments[selectedInstrumentIndex].id}

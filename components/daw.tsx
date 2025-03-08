@@ -289,6 +289,8 @@ export default function DAW() {
             ...importedProject,
             instruments: importedProject.instruments.map((instrument: any) => ({
               ...instrument,
+              volume: instrument.volume ?? 1,
+              pan: instrument.pan ?? 0,
               oscillator: {
                 ...instrument.oscillator,
                 sample:
@@ -326,8 +328,12 @@ export default function DAW() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header */}
-      <header className="bg-gray-800 p-4 flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Tracker DAW</h1>
+      <header className="bg-gray-800 px-4 flex justify-between items-center">
+        <TransportControls
+          audioEngine={audioEngine}
+          currentPattern={project.patterns[currentPatternIndex]}
+          project={project}
+        />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Save className="mr-2 h-4 w-4" />
@@ -341,11 +347,6 @@ export default function DAW() {
       </header>
 
       {/* Transport Controls */}
-      <TransportControls
-        audioEngine={audioEngine}
-        currentPattern={project.patterns[currentPatternIndex]}
-        project={project}
-      />
 
       {/* Main Content */}
       {isLoading ? (

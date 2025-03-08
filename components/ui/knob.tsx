@@ -93,7 +93,7 @@ export function Knob({
             key={i}
             className={cn(
               "absolute top-0 left-1/2 -translate-x-1/2 origin-bottom",
-              isMiddle ? "h-2 w-0.5 bg-white" : "h-1 w-0.5 bg-gray-400"
+              isMiddle ? "h-2 w-0.5 bg-yellow-400" : "h-1 w-0.5 bg-yellow-700"
             )}
             style={{
               transform: `translateX(-50%) rotate(${rotation}deg)`,
@@ -124,7 +124,7 @@ export function Knob({
       {/* Knob handle */}
       <div
         ref={knobRef}
-        className="absolute inset-2 rounded-full bg-gray-700 cursor-pointer shadow-lg"
+        className="absolute inset-2 rounded-full border-2 border-orange-600 cursor-pointer shadow-lg"
         style={{
           width: size - 16,
           height: size - 16,
@@ -139,7 +139,7 @@ export function Knob({
       >
         {/* Indicator line */}
         <div
-          className="absolute top-1/2 left-1/2 w-0.5 h-2 bg-white rounded-full"
+          className="absolute top-2 left-1/2 w-0.5 h-2 bg-orange-400 rounded-full"
           style={{
             transform: "translate(-50%, -100%)",
           }}

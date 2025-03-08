@@ -172,8 +172,18 @@ export default function TrackerEvent({
     }
 
     const value = isEditing ? editValue : formatNote(note!);
+    const instrumentColor = [
+      "text-red-500",
+      "text-orange-500",
+      "text-green-500",
+      "text-blue-500",
+      "text-yellow-500",
+      "text-purple-500",
+      "text-orange-500",
+      "text-pink-500",
+    ][parseInt(value.slice(0, 2), 16) % 8];
     const parts = [
-      { text: value.slice(0, 2), color: "text-red-500" }, // Instrument
+      { text: value.slice(0, 2), color: instrumentColor }, // Instrument
       { text: value.slice(2, 4), color: "text-gray-400" }, // Velocity
       { text: value.slice(4, 6), color: "text-blue-300" }, // Note
       { text: value.slice(6, 8), color: "text-purple-400" }, // Effect

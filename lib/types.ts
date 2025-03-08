@@ -47,6 +47,9 @@ export interface Instrument {
   oscillator: Oscillator;
   filter: Filter;
   envelope: Envelope;
+  maxVoices?: number; // Maximum number of simultaneous voices (optional, defaults to 16)
+  volume: number; // 0 to 1
+  pan: number; // -1 to 1
 }
 
 export interface Note {
@@ -106,6 +109,8 @@ export const defaultProject: Project = {
         sustain: 0.5,
         release: 0.2,
       },
+      volume: 1,
+      pan: 0,
     },
     {
       id: "01",
@@ -134,6 +139,8 @@ export const defaultProject: Project = {
         sustain: 0,
         release: 0,
       },
+      volume: 1,
+      pan: 0,
     },
     {
       id: "02",
@@ -162,6 +169,8 @@ export const defaultProject: Project = {
         sustain: 0.6,
         release: 0.3,
       },
+      volume: 1,
+      pan: 0,
     },
   ],
   patterns: [

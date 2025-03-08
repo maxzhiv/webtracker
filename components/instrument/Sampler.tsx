@@ -207,11 +207,7 @@ export default function Sampler({
           className="hidden"
           id="sample-upload"
         />
-        <label htmlFor="sample-upload">
-          <Button variant="outline" asChild>
-            <span>Load Sample</span>
-          </Button>
-        </label>
+
         {sample?.fileName && (
           <span className="text-sm text-gray-400">{sample.fileName}</span>
         )}
@@ -221,7 +217,7 @@ export default function Sampler({
         <canvas
           ref={canvasRef}
           width={400}
-          height={100}
+          height={50}
           className="w-full bg-gray-950 rounded"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -230,9 +226,18 @@ export default function Sampler({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-center mb-2">Gain</label>
+      <div className="flex gap-2 relative">
+        <label
+          htmlFor="sample-upload"
+          className="h-full flex flex-col items-center justify-center"
+        >
+          <Button variant="outline" asChild className="">
+            <span>LOAD</span>
+          </Button>
+        </label>
+        <div className="flex-1"></div>
+        <div className="flex items-center gap-2">
+          <label>Gain</label>
           <Knob
             value={sample?.gain ?? 1}
             min={0}
@@ -244,8 +249,7 @@ export default function Sampler({
             }
           />
         </div>
-        <div>
-          <label className="block text-center mb-2">Loop</label>
+        <div className="flex items-center gap-2">
           <Select
             value={sample?.loopType ?? "oneshot"}
             onValueChange={(value) =>

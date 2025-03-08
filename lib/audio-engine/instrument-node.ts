@@ -4,40 +4,188 @@ import { midiToFrequency } from "../utils";
 export class InstrumentNode {
   private context: AudioContext;
   private output: GainNode;
-  private oscillator: OscillatorNode | null = null;
-  private noiseNode: AudioBufferSourceNode | null = null;
-  private filter: BiquadFilterNode;
   private gainNode: GainNode;
   private instrument: Instrument;
   public sampleBuffer: AudioBuffer | null = null;
-  private activeNotes: Map<
-    number,
-    {
-      oscillator: OscillatorNode | AudioBufferSourceNode;
-      gain: GainNode;
-      filterEnvelope?: GainNode;
-      filterModSource?: ConstantSourceNode;
-    }
-  > = new Map();
+
+  // Voice pool structure
+  private voicePool: {
+    oscillator: OscillatorNode | AudioBufferSourceNode | null;
+    gain: GainNode;
+    voiceFilter: BiquadFilterNode;
+    pan: StereoPannerNode;
+    filterEnvelope: GainNode;
+    filterModSource: ConstantSourceNode;
+    midiNote: number | null;
+    startTime: number;
+    isActive: boolean;
+    cleanupTimeout: number | null; // Track cleanup timeout ID
+  }[] = [];
 
   constructor(context: AudioContext, output: GainNode, instrument: Instrument) {
     this.context = context;
     this.output = output;
     this.instrument = instrument;
 
-    // Create filter
-    this.filter = context.createBiquadFilter();
-    this.filter.type = instrument.filter.type;
-    this.filter.frequency.value = instrument.filter.frequency;
-    this.filter.Q.value = instrument.filter.resonance;
-
-    // Create gain node
+    // Create master gain node for instrument volume
     this.gainNode = context.createGain();
-    this.gainNode.gain.value = 1;
-
-    // Connect nodes
-    this.filter.connect(this.gainNode);
+    this.gainNode.gain.value = instrument.volume;
     this.gainNode.connect(this.output);
+
+    console.log("[InstrumentNode] Created with initial settings:", {
+      volume: instrument.volume,
+      maxVoices: instrument.maxVoices ?? 16,
+    });
+
+    // Initialize voice pool with maximum voices
+    this.initializeVoicePool();
+  }
+
+  private initializeVoicePool() {
+    // Clear existing pool
+    this.voicePool.forEach((voice) => {
+      if (voice.oscillator) {
+        try {
+          voice.oscillator.stop();
+          voice.oscillator.disconnect();
+        } catch (e) {
+          console.warn("[InstrumentNode] Error cleaning up oscillator:", e);
+        }
+      }
+
+      // Cleanup all audio nodes
+      try {
+        voice.gain.disconnect();
+        voice.voiceFilter.disconnect();
+        voice.filterEnvelope.disconnect();
+        voice.filterModSource.stop();
+        voice.filterModSource.disconnect();
+      } catch (e) {
+        console.warn("[InstrumentNode] Error cleaning up voice nodes:", e);
+      }
+
+      // Clear references
+      voice.oscillator = null;
+      voice.midiNote = null;
+      voice.isActive = false;
+    });
+
+    this.voicePool = [];
+
+    // Create new voices
+    const maxVoices = this.instrument.maxVoices ?? 16;
+    console.log("[InstrumentNode] Initializing voice pool:", { maxVoices });
+    for (let i = 0; i < maxVoices; i++) {
+      const voice = this.createVoice();
+      this.voicePool.push(voice);
+    }
+  }
+
+  private createVoice() {
+    // Create voice filter (replaces main filter)
+    const voiceFilter = this.context.createBiquadFilter();
+    voiceFilter.type = this.instrument.filter.type;
+    voiceFilter.frequency.value = this.instrument.filter.frequency;
+    voiceFilter.Q.value = this.instrument.filter.resonance;
+
+    // Create voice gain (for amplitude envelope)
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(0, this.context.currentTime); // Start muted
+
+    // Create voice pan
+    const pan = this.context.createStereoPanner();
+    pan.pan.value = this.instrument.pan;
+
+    // Create filter envelope
+    const filterEnvelope = this.context.createGain();
+    filterEnvelope.gain.setValueAtTime(0, this.context.currentTime);
+
+    // Create filter modulation source
+    const filterModSource = this.context.createConstantSource();
+    filterModSource.offset.value = 1; // Base value for modulation
+
+    // Set up voice routing:
+    // OSC -> FILTER (+FLT ENV MOD) -> VOICE_GAIN * (AMP ENV MOD) -> VOICE PAN -> MASTER GAIN -> OUTPUT
+    filterModSource.connect(filterEnvelope);
+    filterEnvelope.connect(voiceFilter.frequency);
+    voiceFilter.connect(gain);
+    gain.connect(pan);
+    pan.connect(this.gainNode);
+    filterModSource.start();
+
+    console.log("[InstrumentNode] Created voice with routing:", {
+      routing: "OSC -> FILTER(+ENV) -> GAIN(+ENV) -> PAN -> MASTER -> OUT",
+    });
+
+    return {
+      oscillator: null as any,
+      gain,
+      voiceFilter,
+      pan,
+      filterEnvelope,
+      filterModSource,
+      midiNote: null,
+      startTime: 0,
+      isActive: false,
+      cleanupTimeout: null,
+    };
+  }
+
+  private initializeVoice(
+    voice: (typeof this.voicePool)[0],
+    midiNote: number,
+    time: number
+  ): OscillatorNode | AudioBufferSourceNode {
+    // Cancel any pending cleanup
+    if (voice.cleanupTimeout !== null) {
+      clearTimeout(voice.cleanupTimeout);
+      voice.cleanupTimeout = null;
+    }
+
+    // 0. Ensure voice is muted
+    voice.gain.gain.cancelScheduledValues(time);
+    voice.gain.gain.setValueAtTime(0, time);
+
+    // 1. Create and tune oscillator
+    if (voice.oscillator instanceof OscillatorNode) {
+      voice.oscillator.frequency.value = midiToFrequency(midiNote);
+    } else {
+      const newOscillator = this.createOscillator(midiNote);
+      newOscillator.connect(voice.voiceFilter);
+      voice.oscillator = newOscillator;
+    }
+
+    // 2. Reset filter envelope
+    voice.filterEnvelope.gain.cancelScheduledValues(time);
+    voice.filterEnvelope.gain.setValueAtTime(0, time);
+
+    // Set base filter frequency and calculate modulation range
+    const baseFreq = this.instrument.filter.frequency;
+    const maxModulation = 10000; // Maximum modulation in Hz
+    const modulationRange =
+      this.instrument.filter.envelopeAmount * maxModulation;
+
+    // Set initial filter frequency and modulation source
+    voice.voiceFilter.frequency.setValueAtTime(baseFreq, time);
+    voice.filterModSource.offset.setValueAtTime(modulationRange, time);
+
+    // Update voice state
+    voice.midiNote = midiNote;
+    voice.startTime = this.context.currentTime;
+    voice.isActive = true;
+
+    console.log("[InstrumentNode] Initialized voice:", {
+      midiNote,
+      frequency:
+        voice.oscillator instanceof OscillatorNode
+          ? voice.oscillator.frequency.value
+          : "N/A",
+      baseFilterFreq: baseFreq,
+      modulationRange,
+      envelopeAmount: this.instrument.filter.envelopeAmount,
+    });
+
+    return voice.oscillator;
   }
 
   // Set sample buffer for sampler oscillator type
@@ -65,142 +213,168 @@ export class InstrumentNode {
   ) {
     const now = time;
 
-    // Calculate the modulation range based on the amount parameter
-    const modRange = baseValue * amount;
+    // For filter envelope, baseValue is 0 and amount controls the modulation depth
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(baseValue, now);
 
-    console.log("[Filter Envelope] Starting envelope application:", {
+    console.log("[InstrumentNode] Applying envelope:", {
+      type: envelope.type,
       baseValue,
       amount,
-      modRange,
-      envelopeType: envelope.type,
-      currentTime: now,
+      time: now,
     });
 
-    // Set initial value
-    param.setValueAtTime(baseValue, now);
-    console.log("[Filter Envelope] Set initial value:", baseValue);
-
-    // Apply envelope based on type
     switch (envelope.type) {
       case "ad":
-        console.log("[Filter Envelope] Applying AD envelope");
-        // Attack
-        const adAttackValue = baseValue + modRange;
-        param.linearRampToValueAtTime(adAttackValue, now + envelope.attack);
-        console.log("[Filter Envelope] Attack phase:", {
-          targetValue: adAttackValue,
-          duration: envelope.attack,
-        });
-
-        // Decay
+        // Attack - go to full modulation
+        param.linearRampToValueAtTime(1.0, now + envelope.attack);
+        // Decay - back to zero
         param.linearRampToValueAtTime(
-          baseValue,
+          0,
           now + envelope.attack + envelope.decay
         );
-        console.log("[Filter Envelope] Decay phase:", {
-          targetValue: baseValue,
-          duration: envelope.decay,
-        });
         break;
 
       case "ar":
-        console.log("[Filter Envelope] Applying AR envelope");
-        // Attack
-        const arAttackValue = baseValue + modRange;
-        param.linearRampToValueAtTime(arAttackValue, now + envelope.attack);
-        console.log("[Filter Envelope] Attack phase:", {
-          targetValue: arAttackValue,
-          duration: envelope.attack,
-        });
-
-        // Release
+        // Attack - go to full modulation
+        param.linearRampToValueAtTime(1.0, now + envelope.attack);
+        // Release - back to zero
         param.linearRampToValueAtTime(
-          baseValue,
+          0,
           now + envelope.attack + envelope.release
         );
-        console.log("[Filter Envelope] Release phase:", {
-          targetValue: baseValue,
-          duration: envelope.release,
-        });
         break;
 
       case "adsr":
-        console.log("[Filter Envelope] Applying ADSR envelope");
-        // Attack
-        const adsrAttackValue = baseValue + modRange;
-        param.linearRampToValueAtTime(adsrAttackValue, now + envelope.attack);
-        console.log("[Filter Envelope] Attack phase:", {
-          targetValue: adsrAttackValue,
-          duration: envelope.attack,
-        });
-
+        // Attack - go to full modulation
+        param.linearRampToValueAtTime(1.0, now + envelope.attack);
         // Decay to sustain level
-        const sustainValue = baseValue + modRange * envelope.sustain;
         param.linearRampToValueAtTime(
-          sustainValue,
+          envelope.sustain,
           now + envelope.attack + envelope.decay
         );
-        console.log("[Filter Envelope] Decay to sustain phase:", {
-          sustainValue,
-          duration: envelope.decay,
-        });
         break;
     }
 
     return param;
   }
 
-  // Apply amplitude envelope
+  // Apply amplitude envelope with velocity
   private applyAmplitudeEnvelope(
     gainNode: GainNode,
+    velocity: number,
     time: number = this.context.currentTime
   ) {
     const envelope = this.instrument.envelope;
     const now = time;
 
+    // Calculate velocity-scaled amplitude (0-1 range)
+    const normalizedVelocity = velocity; // MIDI velocity is 0-127 but we have it 0-1
+    const velocityGain = normalizedVelocity * this.instrument.volume;
+
+    console.log("[InstrumentNode] Applying amplitude envelope:", {
+      velocity,
+      normalizedVelocity,
+      instrumentVolume: this.instrument.volume,
+      finalGain: velocityGain,
+      time: now,
+      envelopeType: envelope.type,
+    });
+
+    // Cancel any previously scheduled values and reset
+    gainNode.gain.cancelScheduledValues(now);
     gainNode.gain.setValueAtTime(0, now);
+
+    // Small offset to ensure proper envelope triggering
+    const epsilon = 0.001;
 
     switch (envelope.type) {
       case "ad":
-        gainNode.gain.linearRampToValueAtTime(1, now + envelope.attack);
+        // Attack phase
+        gainNode.gain.linearRampToValueAtTime(
+          velocityGain,
+          now + envelope.attack
+        );
+        // Decay phase - add small time offset to ensure proper sequencing
         gainNode.gain.linearRampToValueAtTime(
           0,
-          now + envelope.attack + envelope.decay
+          now + envelope.attack + envelope.decay + epsilon
         );
         break;
 
       case "ar":
-        gainNode.gain.linearRampToValueAtTime(1, now + envelope.attack);
+        // Attack phase
+        gainNode.gain.linearRampToValueAtTime(
+          velocityGain,
+          now + envelope.attack
+        );
+        // Release phase - add small time offset
         gainNode.gain.linearRampToValueAtTime(
           0,
-          now + envelope.attack + envelope.release
+          now + envelope.attack + envelope.release + epsilon
         );
         break;
 
       case "adsr":
-        gainNode.gain.linearRampToValueAtTime(1, now + envelope.attack);
+        // Attack phase
         gainNode.gain.linearRampToValueAtTime(
-          envelope.sustain,
-          now + envelope.attack + envelope.decay
+          velocityGain,
+          now + envelope.attack
+        );
+        // Decay to sustain level
+        const sustainLevel = velocityGain * envelope.sustain;
+        gainNode.gain.linearRampToValueAtTime(
+          sustainLevel,
+          now + envelope.attack + envelope.decay + epsilon
         );
         break;
     }
+
+    console.log("[InstrumentNode] Envelope scheduled:", {
+      type: envelope.type,
+      attackTime: now + envelope.attack,
+      attackValue: velocityGain,
+      decayEndTime:
+        envelope.type !== "ar" ? now + envelope.attack + envelope.decay : null,
+      sustainLevel:
+        envelope.type === "adsr" ? velocityGain * envelope.sustain : null,
+    });
   }
 
   // Update instrument parameters
   updateInstrument(instrument: Instrument) {
+    const oldMaxVoices = this.instrument.maxVoices ?? 16;
+    const newMaxVoices = instrument.maxVoices ?? 16;
+    const oldVolume = this.instrument.volume;
+
     this.instrument = instrument;
 
-    // Update filter parameters in real-time
-    this.filter.type = instrument.filter.type;
-    this.filter.frequency.setValueAtTime(
-      instrument.filter.frequency,
-      this.context.currentTime
-    );
-    this.filter.Q.setValueAtTime(
-      instrument.filter.resonance,
-      this.context.currentTime
-    );
+    // Update master gain
+    this.gainNode.gain.value = instrument.volume;
+
+    // Update voice filters
+    this.voicePool.forEach((voice) => {
+      voice.voiceFilter.type = instrument.filter.type;
+      voice.voiceFilter.frequency.setValueAtTime(
+        instrument.filter.frequency,
+        this.context.currentTime
+      );
+      voice.voiceFilter.Q.setValueAtTime(
+        instrument.filter.resonance,
+        this.context.currentTime
+      );
+    });
+
+    // If volume changed, update all active voices
+    if (oldVolume !== instrument.volume) {
+      this.voicePool.forEach((voice) => {
+        if (voice.isActive) {
+          const currentGain = voice.gain.gain.value;
+          const scaledGain = (currentGain / oldVolume) * instrument.volume;
+          voice.gain.gain.setValueAtTime(scaledGain, this.context.currentTime);
+        }
+      });
+    }
 
     // Update sample buffer for sampler instrument
     if (
@@ -210,149 +384,202 @@ export class InstrumentNode {
       this.setSampleBuffer(instrument.oscillator.sample.buffer as AudioBuffer);
     }
 
-    // Update oscillator parameters for all active notes
-    this.activeNotes.forEach((note, midiNote) => {
-      if (note.oscillator instanceof OscillatorNode) {
-        if (
-          note.oscillator.type !== instrument.oscillator.type &&
-          instrument.oscillator.type !== "noise"
-        ) {
-          note.oscillator.type = instrument.oscillator.type as OscillatorType;
+    // If max voices changed or oscillator type changed, reinitialize pool
+    if (
+      oldMaxVoices !== newMaxVoices ||
+      this.voicePool[0]?.oscillator instanceof OscillatorNode !==
+        (instrument.oscillator.type !== "sampler" &&
+          instrument.oscillator.type !== "noise")
+    ) {
+      this.initializeVoicePool();
+    } else {
+      // Update existing oscillators
+      this.voicePool.forEach((voice) => {
+        if (voice.isActive && voice.oscillator instanceof OscillatorNode) {
+          if (
+            voice.oscillator.type !== instrument.oscillator.type &&
+            instrument.oscillator.type !== "noise" &&
+            instrument.oscillator.type !== "sampler"
+          ) {
+            voice.oscillator.type = instrument.oscillator
+              .type as OscillatorType;
+          }
+          voice.oscillator.detune.setValueAtTime(
+            instrument.oscillator.detune,
+            this.context.currentTime
+          );
         }
-        note.oscillator.detune.setValueAtTime(
-          instrument.oscillator.detune,
-          this.context.currentTime
-        );
-      }
+      });
+    }
+  }
+
+  // Find available voice or steal oldest one
+  private getVoice(midiNote: number): (typeof this.voicePool)[0] {
+    // First, try to find the same note (for retrigger)
+    const existingVoice = this.voicePool.find((v) => v.midiNote === midiNote);
+    if (existingVoice) {
+      console.log("[InstrumentNode] Reusing voice for same note:", {
+        midiNote,
+      });
+      return existingVoice;
+    }
+
+    // Then, try to find an inactive voice
+    const inactiveVoice = this.voicePool.find((v) => !v.isActive);
+    if (inactiveVoice) {
+      console.log("[InstrumentNode] Using inactive voice for note:", {
+        midiNote,
+      });
+      return inactiveVoice;
+    }
+
+    // Finally, steal the oldest voice
+    const oldestVoice = this.voicePool.reduce((oldest, current) =>
+      current.startTime < oldest.startTime ? current : oldest
+    );
+    console.log("[InstrumentNode] Stealing oldest voice for note:", {
+      midiNote,
+      oldNote: oldestVoice.midiNote,
+      oldStartTime: oldestVoice.startTime,
     });
+    return oldestVoice;
   }
 
   // Trigger note on
   noteOn(midiNote: number, velocity: number, time = 0) {
-    console.log("[Filter Envelope] Note ON:", {
-      midiNote,
-      baseFreq: this.instrument.filter.frequency,
-      envelopeAmount: this.instrument.filter.envelopeAmount,
-    });
+    console.log("[InstrumentNode] Note ON:", { midiNote, velocity, time });
 
-    // Create oscillator
-    const oscillator = this.createOscillator(midiNote);
+    // Get a voice from the pool
+    const voice = this.getVoice(midiNote);
 
-    // Create gain node for this note
-    const noteGain = this.context.createGain();
-    noteGain.gain.setValueAtTime(0, this.context.currentTime);
+    // If voice is active, stop it immediately
+    if (voice.isActive) {
+      this.stopVoice(voice, time, true);
+    }
 
-    // Create filter envelope modulation
-    const filterEnvelope = this.context.createGain();
-    filterEnvelope.gain.setValueAtTime(0, time); // Start at 0 modulation
-    console.log(
-      "[Filter Envelope] Created modulation gain node with initial frequency:",
-      this.instrument.filter.frequency
-    );
+    // Initialize voice with new note
+    const oscillator = this.initializeVoice(voice, midiNote, time);
 
-    // Connect oscillator to note gain to filter
-    oscillator.connect(noteGain);
-    noteGain.connect(this.filter);
-
-    // Set base filter frequency
-    this.filter.frequency.setValueAtTime(
-      this.instrument.filter.frequency,
-      time
-    );
-
-    // Calculate modulation amount in Hz
-    const maxModulation = 10000; // Maximum modulation range in Hz
-    const scaledAmount = this.instrument.filter.envelopeAmount * maxModulation;
-
-    console.log("[Filter Envelope] Applying envelope modulation:", {
-      baseFrequency: this.instrument.filter.frequency,
-      envelopeAmount: this.instrument.filter.envelopeAmount,
-      scaledModulation: scaledAmount,
-    });
-
-    // Apply filter envelope modulation
+    // Start envelopes
     this.applyEnvelope(
-      filterEnvelope.gain,
+      voice.filterEnvelope.gain,
       this.instrument.filter.envelope,
-      0, // Start from 0
-      1, // Full modulation range
+      0,
+      1,
       time
     );
+    this.applyAmplitudeEnvelope(voice.gain, velocity, time);
 
-    // Create constant source for filter modulation
-    const filterModSource = this.context.createConstantSource();
-    filterModSource.offset.value = scaledAmount;
-    filterModSource.connect(filterEnvelope);
-    filterModSource.start(time);
-
-    // Connect filter envelope to filter frequency
-    filterEnvelope.connect(this.filter.frequency);
-
-    // Apply amplitude envelope
-    this.applyAmplitudeEnvelope(noteGain, time);
-
-    // Start oscillator
+    // Start the oscillator
     oscillator.start(time);
-
-    // Store active note
-    this.activeNotes.set(midiNote, {
-      oscillator,
-      gain: noteGain,
-      filterEnvelope,
-      filterModSource, // Store for cleanup
-    });
   }
 
-  // Trigger note off
-  noteOff(midiNote: number, time = 0) {
-    const note = this.activeNotes.get(midiNote);
-    if (!note) return;
+  // Stop a specific voice
+  private stopVoice(
+    voice: (typeof this.voicePool)[0],
+    time: number,
+    immediate = false
+  ) {
+    if (!voice.isActive) return;
 
-    console.log("[Filter Envelope] Note OFF:", { midiNote, time });
+    // Cancel any pending cleanup
+    if (voice.cleanupTimeout !== null) {
+      clearTimeout(voice.cleanupTimeout);
+      voice.cleanupTimeout = null;
+    }
+
+    console.log("[InstrumentNode] Stopping voice:", {
+      midiNote: voice.midiNote,
+      immediate,
+      time,
+      currentGain: voice.gain.gain.value,
+    });
+
+    // Always cancel scheduled values first
+    voice.gain.gain.cancelScheduledValues(time);
+    voice.filterEnvelope.gain.cancelScheduledValues(time);
+    voice.filterModSource.offset.cancelScheduledValues(time);
+
+    if (immediate) {
+      // Set immediate values
+      voice.gain.gain.setValueAtTime(0, time);
+      voice.filterEnvelope.gain.setValueAtTime(0, time);
+      voice.filterModSource.offset.setValueAtTime(0, time);
+
+      if (voice.oscillator) {
+        try {
+          voice.oscillator.stop(time);
+          voice.oscillator.disconnect();
+        } catch (e) {
+          console.warn("[InstrumentNode] Error stopping oscillator:", e);
+        }
+        voice.oscillator = null;
+      }
+
+      voice.isActive = false;
+      voice.midiNote = null;
+      return;
+    }
 
     const releaseTime =
-      this.instrument.envelope.type === "adsr"
+      this.instrument.envelope.type === "adsr" ||
+      this.instrument.envelope.type === "ar"
         ? this.instrument.envelope.release
         : 0.01;
 
-    // Apply release stage
-    note.gain.gain.setValueAtTime(note.gain.gain.value, time);
-    note.gain.gain.linearRampToValueAtTime(0, time + releaseTime);
+    // Get current gain value before applying release
+    const currentGain = voice.gain.gain.value;
+    voice.gain.gain.setValueAtTime(currentGain, time);
+    voice.gain.gain.linearRampToValueAtTime(0, time + releaseTime);
 
-    // Apply filter envelope release if it exists
-    if (
-      note.filterEnvelope &&
-      this.instrument.filter.envelope.type === "adsr"
-    ) {
-      const currentValue = note.filterEnvelope.gain.value;
-      console.log("[Filter Envelope] Starting release phase:", {
-        currentValue,
-        targetValue: 0,
-        duration: this.instrument.filter.envelope.release,
-      });
-
-      note.filterEnvelope.gain.setValueAtTime(currentValue, time);
-      note.filterEnvelope.gain.linearRampToValueAtTime(
+    // Apply filter envelope release
+    if (this.instrument.filter.envelope.type === "adsr") {
+      const currentFilterEnv = voice.filterEnvelope.gain.value;
+      voice.filterEnvelope.gain.setValueAtTime(currentFilterEnv, time);
+      voice.filterEnvelope.gain.linearRampToValueAtTime(
         0,
         time + this.instrument.filter.envelope.release
       );
     }
 
-    // Schedule cleanup
-    setTimeout(() => {
-      note.oscillator.stop();
-      note.oscillator.disconnect();
-      note.gain.disconnect();
-      if (note.filterEnvelope) {
-        note.filterEnvelope.disconnect();
+    // Schedule cleanup with precise timing
+    const cleanupTime = time + releaseTime;
+    const timeoutDelay = (cleanupTime - this.context.currentTime) * 1000;
+
+    voice.cleanupTimeout = setTimeout(() => {
+      if (voice.oscillator) {
+        try {
+          voice.oscillator.stop(cleanupTime);
+          voice.oscillator.disconnect();
+        } catch (e) {
+          console.warn("[InstrumentNode] Error cleaning up oscillator:", e);
+        }
       }
-      if (note.filterModSource) {
-        note.filterModSource.stop();
-        note.filterModSource.disconnect();
+      voice.isActive = false;
+      voice.midiNote = null;
+      voice.oscillator = null;
+      voice.cleanupTimeout = null;
+    }, timeoutDelay) as unknown as number;
+  }
+
+  // Trigger note off
+  noteOff(midiNote: number, time = 0, immediate = false) {
+    const voice = this.voicePool.find(
+      (v) => v.midiNote === midiNote && v.isActive
+    );
+    if (voice) {
+      this.stopVoice(voice, time, immediate);
+    }
+  }
+
+  // Release all notes
+  releaseAll() {
+    const now = this.context.currentTime;
+    this.voicePool.forEach((voice) => {
+      if (voice.isActive) {
+        this.stopVoice(voice, now);
       }
-      this.activeNotes.delete(midiNote);
-      console.log("[Filter Envelope] Cleaned up note:", midiNote);
-    }, (time - this.context.currentTime + releaseTime) * 1000);
+    });
   }
 
   // Create noise source
@@ -440,13 +667,5 @@ export class InstrumentNode {
       osc.detune.value = this.instrument.oscillator.detune;
       return osc;
     }
-  }
-
-  // Release all notes
-  releaseAll() {
-    const now = this.context.currentTime;
-    this.activeNotes.forEach((note, midiNote) => {
-      this.noteOff(midiNote, now);
-    });
   }
 }

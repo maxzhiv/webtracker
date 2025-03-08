@@ -51,14 +51,14 @@ export default function Filter({ instrument, onChangeParameter }: FilterProps) {
           </SelectContent>
         </Select>
       </div>
-      <div className="grid grid-cols-1 gap-4">
-        <div>
+      <div className="grid grid-cols-1 gap-0">
+        <div className="flex flex-col items-center gap-0">
           <Knob
             value={freqToKnob(getKnobValue(instrument.filter.frequency, 1000))}
             min={0}
             max={1}
             step={0.001}
-            size={120}
+            size={94}
             onChange={(value) =>
               onChangeParameter("filter.frequency", knobToFreq(value))
             }
@@ -69,7 +69,7 @@ export default function Filter({ instrument, onChangeParameter }: FilterProps) {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-center">RES</label>
+            <label className="block text-center text-xs">RES</label>
             <Knob
               value={getKnobValue(instrument.filter.resonance, 1)}
               min={0.1}
@@ -80,7 +80,7 @@ export default function Filter({ instrument, onChangeParameter }: FilterProps) {
             />
           </div>
           <div>
-            <label className="block text-center">MOD</label>
+            <label className="block text-center text-xs">MOD</label>
             <Knob
               value={getKnobValue(instrument.filter.envelopeAmount, 0)}
               min={-1}
