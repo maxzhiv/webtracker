@@ -223,17 +223,45 @@ export default function PatternEditor({
     if (!note) return null;
 
     // Get instrument name for display
-    const instrumentIndex = parseInt(note.instrument, 16);
-    const instrument = instruments[instrumentIndex];
-    const instrumentName = instrument ? instrument.name : "Unknown";
+    // const instrumentIndex = parseInt(note.instrument, 16);
+    // const instrument = instruments[instrumentIndex];
+    // const instrumentName = instrument ? instrument.name : "Unknown";
 
     // Get note name
     const noteName = midiNoteToName(note.tone);
+    const instrumentColor = [
+      "text-red-500",
+      "text-orange-500",
+      "text-yellow-500",
+      "text-green-500",
+      "text-teal-500",
+      "text-cyan-500",
+      "text-blue-500",
+      "text-purple-500",
+    ][parseInt(note.instrument, 16) % 8];
+    const velocityColor = [
+      "text-gray-700",
+      "text-gray-600",
+      "text-gray-500",
+      "text-gray-400",
+      "text-gray-300",
+      "text-gray-200",
+      "text-gray-100",
+      "text-gray-0",
+    ][Math.trunc(note.velocity / 32)];
 
     return (
       <div className="flex flex-col text-xs">
-        <span className="font-bold">{noteName}</span>
-        <span className="opacity-70 truncate">{instrumentName}</span>
+        <span className="font-monospace">
+          <span className={instrumentColor}>{note.instrument}</span>
+          <span className={velocityColor}>
+            {note.velocity.toString(16).toUpperCase()}
+          </span>
+          <span className="text-blue-300">{noteName}</span>
+          {note.effect.toString(16).toUpperCase().padStart(2, "0")}
+          {note.effectValue.toString(16).toUpperCase().padStart(4, "0")}
+        </span>
+        {/* <span className="opacity-70 truncate">{instrumentName}</span> */}
       </div>
     );
   };
